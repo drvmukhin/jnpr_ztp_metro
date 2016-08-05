@@ -1,0 +1,220 @@
+version 1.1;
+/* ------------------------------------------------------------------ */
+/* This program performs Zero touch provisioning for the ACX platform */
+/* It will set up OAM VLAN and Bridge Domain to allow permanent       */
+/* management access to the box.  */
+/* */
+/* Version 1.0 Vasily Mukhin vmukhin@juniper.net */
+/* Based on jctyztp script by Jeremy Schulman and Brian Sherwood */
+/* */
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* XML namespaces */
+/* ------------------------------------------------------------------ */
+/* Juniper */
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns exsl extension = "http://exslt.org/common";
+/* EXSLT */
+ns str extension = "http://exslt.org/strings";
+/* private namespace for this script */
+ns ztp_script = "http://xml.juniper.com/ztp_script/1.0";
+import '../import/junos.xsl';
+/* ------------------------------------------------------------------ */
+/* Script parameters */
+/* ------------------------------------------------------------------ */
+/* param $server = '10.253.43.29'; */
+/* ------------------------------------------------------------------ */
+/* Constants */
+/* ------------------------------------------------------------------ */
+var $APPNAME = 'ztp_script[' _ $junos-context/pid _ ']';
+var $SYSLOG = 'user.info';
+var $TMPDIR = '/var/tmp';
+var $CODEDIR = '/var/tmp';
+var $ZTP_GROUP_PLATFORM = "GR-ZTP-PLATFORM";
+var $ZTP_GROUP_NNI_TAG = "GR-NNI-TAG";
+var $ZTP_GROUP_STAGE_1 = "GR-ZTP-STAGE-1";
+var $ZTP_GROUP_STAGE_2 = "GR-ZTP-STAGE-2";
+var $ZTP_GROUP_SPACE = "GR-ZTP-SPACE";
+var $ZTP_MACRO_PREFIX = "ZTP-";
+var $ZTP_GROUP_BOX = "GR-ZTP-BOX";
+var $ZTP_BD_OAM = "BD-ZTP-OAM";
+var $ZTP_OAM_VLAN = "OAM_VLAN";
+var $ZTP_LOOPBACK = "Lo0";
+var $ZTP_CODE_MACRO_NAME = "code";
+var $ZTP_CONFIG_MACRO_NAME = "config";
+var $ZTP_LOCKFILE = '/tmp/ztp_script.lock';
+var $ZTP_VLAN_SPARE = "4094";
+var $ZTP_INVENTORY_FILE = "modeling_devices.csv";
+var $ZTP_AGN_CONFIG = "agn_ztp_config.conf"
+var $ZTP_SPACE_COFIGLET_FILE = "modeling-device-ring-1010.conf";
+var $ZTP_SPACE_CONFIGLET_SRC = "ftp://vmukhin:jnpr1234@23.0.100.3://config";
+var $PATTERN = "system";
+/* ------------------------------------------------------------------ */
+/* Global variables */
+/* ------------------------------------------------------------------ */
+var $jnx = jcs:open();
+/* ------------------------------------------------------------------ */
+/* MAIN */
+/* ------------------------------------------------------------------ */
+match / {
+	mvar $ztp_result = true();
+    if( not( $jnx )) {
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to connect to Junos API");
+        expr jcs:progress( "ZTP-SCRIPT: ERROR: unable to connect to Junos API");
+        expr jcs:output( $APPNAME _ ":ERROR: unable to connect to Junos API");
+        terminate;
+    }
+    var $running = ztp_script:only_once();
+    if( $running ) {
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": process already running, backing off" );
+        expr jcs:progress( "ZTP-SCRIPT: process already running, backing off" );
+        expr jcs:output( $APPNAME _ ": process already running, backing off" );
+        terminate;
+    }
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": SCRIPT-BEGIN" );
+    expr jcs:progress( "ZTP-SCRIPT: SCRIPT-BEGIN" );
+	if (not (ztp_script:file-copy($ZTP_SPACE_CONFIGLET_SRC, $ZTP_AGN_CONFIG , $TMPDIR))) {
+		expr jcs:progress( "ZTP-SCRIPT: Cant' find file: " _ $ZTP_AGN_CONFIG _ " on ftp server. Terminating script");
+		expr jcs:syslog( $SYSLOG, $APPNAME _ "Cant' find file: " _ $ZTP_AGN_CONFIG _ " on ftp server. Terminating script");
+		var $die = ztp_script:terminate();	
+	}
+	var $filename = $TMPDIR _ "/" _ $ZTP_AGN_CONFIG;
+	if (not (ztp_script:file-exists( $filename ))) {
+		expr jcs:progress( "ZTP-SCRIPT: Cant' find " _ $filename _ ". Terminating script");
+		expr jcs:syslog( $SYSLOG, $APPNAME _ "Cant' find " _ $filename _ ". Terminating script");
+		var $die = ztp_script:terminate();	
+	} 
+	set $ztp_result = ztp_script:load_config($filename);
+    if (not (ztp_script:load_config($filename))) {
+        expr jcs:progress( "ZTP-SCRIPT: SCRIPT FAILED TO UPDATE ZTP CONFIG.");
+    } else {
+        expr jcs:progress( "ZTP-SCRIPT: ZTP CONFIG SUCCESSFULLY UPDATED" );
+	}
+	var $die = ztp_script:terminate();	
+}
+/* ------------------------------------------------------------------ */
+/*   LOAD CONFIGURATION FROM FILE */
+/* ------------------------------------------------------------------ */
+function ztp_script:load_config($config_url, $action = "merge") {
+	mvar $load_config = true();
+	var $phrase = {
+		if ($action == "merge") {
+			expr "merged to existed configuration";
+		} else {
+			if ($action == "replace") {
+				expr " and replace existed statements";
+			} else {
+				expr " be merged (default action) to existed configuration";
+			}
+		}
+	}
+	var $new_action = {
+		if ($action == "merge") or ($action == "replace") {
+			expr $action;
+		} else {
+            expr "merge";
+		}
+	}
+    expr jcs:progress( "Config file: " _ $config_url _ " will be loaded and " _ $phrase  );
+    /* lock the config */
+    var $lock = <lock-configuration>;
+    var $did_lock = jcs:execute( $jnx, $lock );
+    if ( $did_lock//self::xnm:error ) {
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to lock config" );
+        expr jcs:progress( "ERROR: unable to lock config" );
+        set $load_config = false();
+    } else {
+        expr jcs:progress( "Got config lock" );
+    }
+    if ($load_config) {       
+	    set $load_config = false();
+        expr jcs:progress( "Processing config url " _ $config_url );
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": Processing config url " _ $config_url );
+        /* load in new config */
+        var $do_load = <load-configuration action="merge" url=$config_url format="text">;
+        var $did_load = jcs:execute( $jnx, $do_load );
+        if( not( $did_load/load-success )) {
+            expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to load config " _ $config_url );
+            expr jcs:progress( "ERROR: unable to load config " _ $config_url );
+        } else {
+            expr jcs:progress( "CONFIG LOAD SUCCESS" );
+            var $commit = <commit-configuration> {
+                <full>;
+                <synchronize>;
+                <force-synchronize>;
+                <log> "Initial config load";
+            }
+            var $did_commit = jcs:execute( $jnx, $commit );
+            if ( $did_commit//self::xnm:error ) {
+                expr jcs:progress( "COMMIT FAILED" );
+                expr jcs:syslog( $SYSLOG, $APPNAME _ ": COMMIT FAILED" );
+            } else {
+                expr jcs:progress( "COMMIT SUCCESS" );
+                /*
+                * reboot here
+                * var $reboot := jcs:execute( $jnx, 'request-reboot' );
+                */
+                var $unlock = <unlock-configuration>;
+                var $did_unlock = jcs:execute( $jnx, $unlock );
+                expr jcs:progress( "release config lock" );
+				set $load_config = true();
+                /*var $die = ztp_script:terminate();*/
+            }
+        }
+    } /* end of foreach config_url */
+	if (not($load_config)) {
+		/* if we make it here, we failed to load the config */
+        var $unlock = <unlock-configuration>;
+        var $did_unlock = jcs:execute( $jnx, $unlock );
+        expr jcs:progress( "release config lock" );
+	}
+    result $load_config;	
+}
+/* ------------------------------------------------------------------ */
+/* Helper routines
+/* ------------------------------------------------------------------ */
+function ztp_script:file-copy( $source, $filename, $destination ) {
+	var $copy_get = <file-copy> {
+        <source> $source _ "/" _ $filename;
+        <destination> $destination _ "/" _ $filename;
+        <staging-directory> $TMPDIR;
+    }
+    var $copy_got = jcs:execute( $jnx, $copy_get );
+	if ( contains($copy_got,"failed")) {
+		result false();
+	} else {
+        result true();
+	}
+}
+function ztp_script:file-exists( $filename ) {
+    var $ls_file = <file-list> { <path> $filename; }
+    var $ls_got = jcs:execute( $jnx, $ls_file );
+    var $retval = boolean( $ls_got//file-information );
+    result $retval;
+}
+function ztp_script:file-delete( $filename ) {
+    var $do_rm = <file-delete> { <path> $filename; }
+    var $did_rm = jcs:execute( $jnx, $do_rm );
+    /* @@@ trap error */
+    result true();
+}
+function ztp_script:only_once() {
+    if( ztp_script:file-exists( $ZTP_LOCKFILE )) {
+        result true();
+    } else {
+        var $do_lock = <file-put> {
+             <filename> $ZTP_LOCKFILE;
+             <encoding> 'ascii';
+             <file-contents> 'locked';
+        }
+    var $did_lock = jcs:execute( $jnx, $do_lock );
+    result false();
+    }
+}
+function ztp_script:terminate() {
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": SCRIPT-TERMINATE" );
+    var $rm_lock = ztp_script:file-delete( $ZTP_LOCKFILE );
+    terminate;
+}

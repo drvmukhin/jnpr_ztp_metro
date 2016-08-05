@@ -1,0 +1,835 @@
+version 1.1;
+/* ------------------------------------------------------------------ */
+/* This program performs Zero touch provisioning for the ACX platform */
+/* It will set up OAM VLAN and Bridge Domain to allow permanent       */
+/* management access to the box.  */
+/* */
+/* Version 1.0 Vasily Mukhin vmukhin@juniper.net */
+/* Based on jctyztp script by Jeremy Schulman and Brian Sherwood */
+/* */
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* XML namespaces */
+/* ------------------------------------------------------------------ */
+/* Juniper */
+ns junos = "http://xml.juniper.net/junos/*/junos";
+ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
+ns jcs = "http://xml.juniper.net/junos/commit-scripts/1.0";
+ns exsl extension = "http://exslt.org/common";
+/* EXSLT */
+ns str extension = "http://exslt.org/strings";
+/* private namespace for this script */
+ns ztp_script = "http://xml.juniper.com/ztp_script/1.0";
+import '../import/junos.xsl';
+/* ------------------------------------------------------------------ */
+/* Script parameters */
+/* ------------------------------------------------------------------ */
+/* param $server = '10.253.43.29'; */
+/* ------------------------------------------------------------------ */
+/* Constants */
+/* ------------------------------------------------------------------ */
+
+var $APPNAME = 'ztp_script[' _ $junos-context/pid _ ']';
+var $SYSLOG = 'user.info';
+var $TMPDIR = '/var/tmp';
+var $CODEDIR = '/var/tmp';
+var $ZTP_GROUP_PLATFORM = "GR-ZTP-PLATFORM";
+var $ZTP_GROUP_BOX = "GR-ZTP-BOX";
+var $ZTP_CODE_MACRO_NAME = "CODE";
+var $ZTP_CONFIG_MACRO_NAME = "CONFIG";
+var $ZTP_MACRO_NAME_PREFIX = "ZTP-";
+var $ZTP_GROUP_NNI_TAG = "GR-NNI-TAG";
+var $ZTP_GROUP_AGG_NNI_TAG = "GR-AGG-INTF-TAG";
+var $ZTP_GROUP_STAGE_1 = "GR-ZTP-STAGE-1";
+var $ZTP_GROUP_STAGE_2 = "GR-ZTP-STAGE-2";
+var $ZTP_GROUP_OSPF = "GR-OSPF";
+var $ZTP_OSPF_AREA = "AREA";
+var $ZTP_BD_OAM = "BD-ZTP-OAM";
+var $ZTP_BD_BOOT = "BD-ZTP-BOOTP";
+var $ZTP_OAM_VLAN = "OAM_VLAN";
+var $ZTP_BOOT_VLAN = "BOOT_VLAN";
+var $ZTP_LOOPBACK = "Lo0";
+var $ZTP_LOCKFILE = '/tmp/ztp_script.lock';
+var $ZTP_IP_VLAN = "1";
+/* ------------------------------------------------------------------ */
+/* Global variables */
+/* ------------------------------------------------------------------ */
+var $jnx = jcs:open();
+/* ------------------------------------------------------------------ */
+/* MAIN */
+/* ------------------------------------------------------------------ */
+match / {
+    if( not( $jnx )) {
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to connect to Junos API");
+        expr jcs:progress( "ERROR: unable to connect to Junos API");
+        expr jcs:output( $APPNAME _ ":ERROR: unable to connect to Junos API");
+        terminate;
+    }
+    var $running = ztp_script:only_once();
+    if( $running ) {
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": process already running, backing off" );
+        expr jcs:progress( "process already running, backing off" );
+        expr jcs:output( $APPNAME _ ": process already running, backing off" );
+        terminate;
+    }
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": SCRIPT-BEGIN" );
+    expr jcs:progress( "SCRIPT-BEGIN" );
+	var $serial_no = ztp_script:get_serial_number();
+	var $platform = ztp_script:get_platform();
+	/*----------------------------------------------*/
+    /* Looking for platform specific ZTP parameters */
+	/*----------------------------------------------*/
+	expr jcs:progress( "ZTP-SCRIPT: Looking for " _ $platform _ " specific parameters." );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ "Looking for " _ $platform _ " specific parameters." );
+    if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_PLATFORM, $ZTP_MACRO_NAME_PREFIX _ $platform, $serial_no) ) ) {
+	expr jcs:progress( "ZTP-SCRIPT: Failed to find platform specific ZTP parameters. Exiting ztp_script now." );
+	var $die = ztp_script:terminate();
+	}
+	/* Configuring platform specific parameters (static ip) */
+	/*
+	    0.  Create host-name: csr<x.y>-<platform>)
+		1.  Cretaes lo0
+		    - IP address assigned: a.b.x.y:
+			   <a.b> are taken from initial parameters in apply-macros or DHCP options
+			   <x.y> are taken from the last two octets of the assigned DHCP address
+		2. Creates OAM VLAN on NNIs:
+		    - NNIs are listed under apply-macros (platform specific list)
+		3. Creates IFL (unit 0) for IP VLAN on NNIs
+		    - All interfaces are IP unnumbered to lo0.0
+		4. Creates IRB interfaces
+			- Copies DHCP assigned address to IRB
+	    5. Delets DHCP-client configuration
+		6. Creates OAM Bridge-domain
+			- NNI IFLs are placed into BD-ZTP-OAM
+			- IRB is placed into BD
+		7. Enables OSPF protocols
+		    - Creates OSPF area based on DHCP options (option for domain-name-server)
+            - Places NNI.0 interfaces into ospf configuration			
+	*/
+	var $results_step_1 = ztp_script:set_dhcp_to_static($platform); 
+    if ($results_step_1//xnm:warning) {
+        for-each ($results_step_1//xnm:warning) {
+			expr jcs:progress( "ZTP-SCRIPT: set_dhcp_to_static() commit warning: " _ message );
+        }
+    }
+	if ($results_step_1//xnm:error) {
+        for-each ($results_step_1//xnm:error) {
+            expr jcs:progress( "ZTP-SCRIPT: set_dhcp_to_static() commit error: " _ message );
+        }
+		expr jcs:progress( "ZTP-SCRIPT: Script failed." );
+		var $die = ztp_script:terminate();
+    } else {
+		expr jcs:progress( "ZTP-SCRIPT: Platform specific configuraton commited successfuly." );
+	    /* Deleting macro for box specific ZTP */
+	    /* var $ztp_rm_grp_1 = ztp_script:remove_old_cfg($ZTP_GROUP_PLATFORM, $serial_no); */
+	}
+	/*-----------------------------------------*/
+	/* Looking for box specific ZTP parameters */
+	/*-----------------------------------------*/
+	expr jcs:progress( "ZTP-SCRIPT: Looking for box (S/N: " _ $serial_no _ ") specific parameters." );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ "Looking for box (S/N: " _ $serial_no _ ") specific parameters." );
+    if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_BOX, $serial_no, $serial_no) ) ) {
+		expr jcs:progress( "ZTP-SCRIPT: Failed to find box specific ZTP parameters. Exiting ztp_script now." );
+		var $die = ztp_script:terminate();
+	}
+	/* Configuring box specific parameters (fxp0 and host name) */
+	var $results_step_2 = ztp_script:set_fxp0($platform, $serial_no);
+    if ($results_step_2//xnm:warning) {
+        for-each ($results//xnm:warning) {
+			expr jcs:progress( "ZTP-SCRIPT: set_fxp0() commit warning: " _ message );
+        }
+    }
+	if ($results_step_2//xnm:error) {
+        for-each ($results_step_1//xnm:error) {
+            expr jcs:progress( "ZTP-SCRIPT: set_fxp0() commit error: " _ message );
+        }
+		expr jcs:progress( "ZTP-SCRIPT: Script failed." );
+		var $die = ztp_script:terminate();
+    } else {
+        expr jcs:progress( "ZTP-SCRIPT: Box specific configuraton commited successfuly." );
+		/* Deleting macro for box specific ZTP */
+		var $ztp_rm_grp_2 = ztp_script:remove_old_cfg($ZTP_GROUP_BOX, $serial_no);
+	}
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": ZTP-SCRIPT: ZTP PHASE 1 COMPLITED SUCCESSFULLY" );
+    expr jcs:progress( "ZTP-SCRIPT: ZTP-SCRIPT: ZTP PHASE 1 COMPLITED SUCCESSFULLY" );
+	/*--------------------------------------------------------------*/
+	/*  Deactivate STAGE#1 Configuration                            */
+	/*  Activate   STAGE#2 Configuration                            */	
+	/*--------------------------------------------------------------*/
+	var $options := {
+        <commit-options> {
+            <log> "Enabling next ZTP Stage"; 
+        }
+	}
+    var $change = {
+        <configuration> {
+            <apply-groups delete="delete"> $ZTP_GROUP_STAGE_1;
+			if ( ztp_script:ztp_grp_exists($ZTP_GROUP_STAGE_2) )  {
+			    <apply-groups> $ZTP_GROUP_STAGE_2;
+			}
+        }
+    }
+	
+    /* Load new configuration */	
+    var $results_stage_0 := { call jcs:load-configuration( $action="merge", $commit-options=$options, $configuration=$change, $connection = $jnx ); }
+    if ($results_stage_0//xnm:warning) {
+        for-each ($results_stage_0//xnm:warning) {
+	        expr jcs:progress( "ZTP-SCRIPT: commit warning: " _ message );
+        }
+    }
+	if ($results_stage_0//xnm:error) {
+        for-each ($results_stage_0//xnm:error) {
+            expr jcs:progress( "ZTP-SCRIPT: commit error: " _ message );
+        }
+	    expr jcs:progress( "ZTP-SCRIPT: Script failed." );
+		var $die = ztp_script:terminate();
+    } else {
+        expr jcs:progress( "ZTP-SCRIPT: ZTP PHASE 1 COMPLITED SUCCESSFULLY" );
+	}
+	var $die = ztp_script:terminate();
+}
+/* ------------------------------------------------------------------ */
+/* FUNCTION VERIFIES IF THERE IS A VALID MACROS FOR THE PLATFORM      */
+/* ------------------------------------------------------------------ */
+function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A", $serial_no = "N/A") {
+	var $get_grp = <get-configuration> {
+         <configuration> {
+            <groups> {
+				<name>;
+			}
+	    }
+    }
+	/* geting variables from apply-macro */
+	var $got_grp = jcs:execute( $jnx, $get_grp );
+	mvar $grp_flag = "skip";
+	for-each ($got_grp/groups/name) {
+		set $grp_flag = {
+			if  ((../name!=$group_name) and ($grp_flag!="exists")) {
+			    expr "skip";
+			} else {
+				expr "exists";
+			} /* End if */
+		}
+    }
+	/* Verification for the apply-macro */	
+    if ($grp_flag != "exists") {
+		expr jcs:progress( "ZTP-SCRIPT: Can't find a group " _ $group_name);
+        result false();
+	} else {
+		expr jcs:progress( "ZTP-SCRIPT: Found a group " _ $group_name);
+		if ( $macro_name!="N/A") {
+	        expr jcs:progress( "ZTP-SCRIPT: Looking for apply-macro " _ $macro_name _ " in group " _ $group_name );
+	        /* Look for apply-macro with specified name */
+	        var $get_mcr = <get-configuration> {
+                <configuration> {
+                    <groups> {
+				        <name> $group_name;
+			        }
+	            }
+            }
+	        /* geting variables from apply-macro */
+	        var $got_mcr = jcs:execute( $jnx, $get_mcr );
+	        mvar $mcr_flag = "skip";
+	        for-each ($got_mcr/groups[name=$group_name]/apply-macro/name) {
+		        set $mcr_flag = {
+			        if  ((../name!=$macro_name) and ($mcr_flag!="exists")) {
+			            expr "skip";
+			        } else {
+				        expr "exists";
+			        } /* End if */
+		        }
+            }
+	        /* Verification for the group */	
+            if ($mcr_flag != "exists") {
+		        expr jcs:progress( "ZTP-SCRIPT: Can't find apply-macro " _ $macro_name );
+		        result false();
+	        } else {
+		        expr jcs:progress( "ZTP-SCRIPT: Found apply-macro " _ $macro_name );
+			    result true();
+	        }		
+	    } else {
+			result true();
+		}
+	}	
+}	
+/* ------------------------------------------------------------------ */
+/* FUNCTION REMOVES ZTP MACROS FROM CONFIGURATION */
+/* ------------------------------------------------------------------ */
+function ztp_script:remove_old_cfg($group_name, $serial_no = "N/A") {
+    expr jcs:progress( "ZTP-SCRIPT: Removing old configuration under group: " _ $group_name );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ "Removing old configuration for node with S/N: " _ $group_name );
+	var $get = <get-configuration> {
+         <configuration> {
+            <groups> {
+				<name>;
+			}
+	    }
+    }
+	/* looking for the given group-name */
+	var $got = jcs:execute( $jnx, $get );
+	mvar $delete_flag = "skip";
+	for-each ($got/groups/name) {
+		set $delete_flag = {
+			if  ((../name!=$group_name) and ($delete_flag!="delete")) {
+			    expr "skip";
+			} else {
+				expr "delete";
+			} /* End if */
+		}
+    }
+    var $options := {
+         <commit-options> {
+            <log> "ztp script prepare to commit"; 
+        }
+	}
+    var $change = {
+        <configuration> {
+			<groups delete="delete"> {
+			    <name> $group_name;
+            }
+        }
+    }
+	/* Deleting config for the group */	
+    	if ($delete_flag == "delete") {
+	        var $results := { call jcs:load-configuration($action="merge", $commit-options=$options, $configuration=$change, $connection = $jnx ); }
+			expr jcs:progress( "ZTP-SCRIPT: group " _ $group_name _ " was deleted" );
+		} else {
+			expr jcs:progress( "ZTP-SCRIPT: Group: " _ $group_name _ " was not found. Nothing to delete ");
+		}
+}
+/* ------------------------------------------------------------------ */
+/* REPLACE DHCP WITH STATIC IP CONFIG                                 */
+/* ------------------------------------------------------------------ */
+function ztp_script:set_dhcp_to_static($platform) {
+    expr jcs:progress( "ZTP-SCRIPT: Retrieve DHCP client bindings" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": Retrieve DHCP client bindings" );
+	 /* GET ZTP VLAN-ID */
+    var $get = <get-configuration> {
+         <configuration> {
+            <groups> {
+               <name> $ZTP_GROUP_PLATFORM;
+               <apply-macro> {
+                  <name> $ZTP_MACRO_NAME_PREFIX _ $platform;
+                }
+            }
+        }
+    }
+	/* geting variables from apply-macro */
+	var $got = jcs:execute( $jnx, $get );
+	var $ztp_oam_vlan = $got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data[name=$ZTP_OAM_VLAN]/value;
+/*	var $ztp_boot_vlan = $got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data[name=$ZTP_BOOT_VLAN]/value;	*/
+    var $ztp_boot_vlan = "3"; /* won't be used in this script version */
+	mvar $lo0_ip_1_2 = $got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data[name=$ZTP_LOOPBACK]/value;
+	 
+	 /* GET VALUES OF THE DHCP OPTIONS */
+	var $get_dhcp_detail = <get-dhcp-client-binding-information> {
+		                       <detail>;
+	                       }
+    var $dhcp_bind := jcs:execute( $jnx, $get_dhcp_detail );
+    /* - GET ZTP INTERFACE - */	
+	var $ztp_interface = $dhcp_bind/dhcp-binding/interface-name;
+    expr jcs:progress( "ZTP-SCRIPT: DHCP client runs on ZTP interface: " _ $ztp_interface );
+    /* - GET ROUTER IP ADDRESS - */	
+	var $ztp_router = $dhcp_bind/dhcp-binding/dhcp-option-table/dhcp-option[dhcp-option-name="router"]/dhcp-option-value;
+	expr jcs:progress( "ZTP-SCRIPT: Found DHCP Option for router: " _ $ztp_router ); 
+	var $post_str = {
+		if ( contains($ztp_router, '[ ')) {
+			expr substring-after($ztp_router, '[ ');
+		} else {
+			expr $ztp_router;
+		}
+	}
+	/* - GET NEXT_HOP FOR DEFAULT ROUTE - */
+	var $ztp_next_hop = {
+		if ( contains($post_str, ' ')) {
+			expr substring-before($post_str, ' ');
+		} else {
+			expr $post_str;
+		}
+	}
+    expr jcs:progress( "ZTP-SCRIPT: Derived next-hop: " _ $ztp_next_hop );
+    /* Looling for real ip-address assigned to dhcp interface */	
+	var $get_interface_terse = <get-interface-information> {
+		                       <terse>;
+							   <interface-name> $ztp_interface;
+	                       }
+	var $interface_info := jcs:execute( $jnx, $get_interface_terse );
+	/* - GET DHCP IP ADDRESS - */
+	var $irb_ip_address = $interface_info/logical-interface/address-family[address-family-name="inet"]/interface-address/ifa-local;
+	expr jcs:progress( "ZTP-SCRIPT: DHCP ip address found: " _ $irb_ip_address);
+	/* - GET DHCP OPTION 15 - domain name - */
+	/* - Domain name will be used to assign ring specific parameters - */
+	var $ztp_domain = $dhcp_bind/dhcp-binding/dhcp-option-table/dhcp-option[dhcp-option-name="domain-name"]/dhcp-option-value;
+	expr jcs:progress( "ZTP-SCRIPT: DHCP domain-name found: " _ $ztp_domain);
+	mvar $ring_ospf_area = {
+		if ( contains($ztp_domain, "area")) {
+		    expr substring-before(substring-after($ztp_domain,"area."),".lo");
+	    } else {
+			expr "0.1";
+		}
+	}
+	set $lo0_ip_1_2 = {
+		if ( contains($ztp_domain, "lo.")) {
+	        expr substring-before(substring-after($ztp_domain,"lo."),"net");
+	    }
+	}
+	/* Create configuration with static IP */
+	var $options := {
+         <commit-options> {
+            <log> "setting irb interface"; 
+        }
+	}
+	/* - CREATE STATIC IP CONFIGURATION - */
+	/*
+	    - Cretaes lo0
+	    - Delets DHCP-client configuration
+		- Creates OAM Bridge-domain
+	    - Configures OAM vlan-bridge unit on ZTP interface
+	    - Moves OAM unit into bridge domain
+		- Creates irb
+		- Copies DHCP-client IP-address to static irb interface
+		- Derive ospf area and first two octets of the lo0 from DHCP domain-name 
+		
+	*/
+	set $ring_ospf_area = "0.0." _ $ring_ospf_area;
+	expr jcs:progress( "ZTP-SCRIPT: Derived OSPF area: " _ $ring_ospf_area );
+    var $ztp_device = substring-before($ztp_interface, '.');
+	var $ztp_device_unit = substring-after($ztp_interface,'.');
+	expr jcs:progress( "ZTP-SCRIPT: Parsing ZTP Interface: ifd=" _ $ztp_device _ " unit=" _ $ztp_device_unit );
+	var $irb_unit_num = $ztp_oam_vlan;
+	var $lo0_ip_3_4 = substring-after(substring-after(substring-before($irb_ip_address,'/'),'.'),'.');
+	var $lo0_ip = $lo0_ip_1_2 _ $lo0_ip_3_4 _ "/32";
+	expr jcs:progress( "ZTP-SCRIPT: lo0.0 will be assigned an ip address: " _ $lo0_ip);	
+    var $change = {
+        <configuration> {
+		    <interfaces> {
+	            <interface> {
+		            <name> "lo0";
+    	            <unit> {
+			            <name> "0";
+			            <family> {
+				            <inet> {
+					            <address> $lo0_ip;
+				            }
+			            }
+		            }
+	            }
+				<interface> {
+					call emit-deactivate-dhcp-client($platform, $ztp_device, $ztp_device_unit);
+				}
+				<interface> {
+					<name> $ztp_device;
+				    <flexible-vlan-tagging>;
+				    <encapsulation> "flexible-ethernet-services";
+					<unit> {
+						<name> $ztp_oam_vlan;
+						<encapsulation> "vlan-bridge";
+						<vlan-id> $ztp_oam_vlan;
+					}
+				}
+	/*			<interface> {
+			        <name> "irb";
+			        <unit> {
+				        <name> $irb_unit_num;
+				        <family> {
+				            <inet> {
+					            <address> $irb_ip_address;
+							} 
+					    }
+					}
+				}
+	*/			var $prefered_ip_addr = substring-before($lo0_ip,'/');
+			    call create-nni-interfaces($platform, $ztp_oam_vlan, $ztp_boot_vlan, $prefered_ip_addr, $got);
+			}
+			call emit-bridge-domain($platform, $irb_unit_num, $ztp_device, $ztp_oam_vlan, $ztp_boot_vlan, $got);
+			<routing-options> {
+				<router-id> $lo0_ip_1_2 _ $lo0_ip_3_4;
+	/*			<static> {
+					<route> {
+						<name> "0.0.0.0/0";
+						<next-hop> $ztp_next_hop;
+						<preference> {
+							<metric-value> "254";
+						}
+					}
+				}
+	*/		}
+			<protocols> {
+				<vstp> {
+                	for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+		                if (contains(../name,"NNI" )) {
+			                <interface> {
+				                <name> ../value;
+			                }
+                            <vlan> {
+								<name> $ztp_oam_vlan;						
+							}
+		                }
+	                }
+				}
+				<lldp> {
+                	for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+		                if (contains(../name,"NNI" )) {
+			                <interface> {
+				                <name> ../value;
+			                } 
+		                }
+	                }
+				}
+				<ospf> {
+					<apply-groups> $ZTP_GROUP_OSPF;
+					<traffic-engineering>;
+					<area> {
+						<name> $ring_ospf_area;
+						call emit-nni-interfaces($platform, $got);
+						<interface> {
+                            <name> "lo0.0";
+	                    }
+					}
+				}
+			}
+			call create-re0-group($platform, $lo0_ip_3_4);
+		}
+    }
+	/* Load configuration for group re0 */	
+    var $results := { call jcs:load-configuration( $action="merge", $commit-options=$options, $configuration=$change, $connection = $jnx ); } 
+	result $results;
+}
+/*--------------------------------------------------------------------*/
+/*  CREATES re0 group with host name */
+/*--------------------------------------------------------------------*/
+template create-re0-group($platform, $lo0_ip_3_4) {
+  	if (($platform=="acx5096") or ($platform=="acx5048")) {	
+	    <groups> {
+			<name> "member0";
+		    <system> {
+			    <host-name> "csr" _ $lo0_ip_3_4 _ "-" _ $platform;
+			}
+		}
+		<apply-groups> "member0";
+	} else {
+	    <groups> {
+			<name> "re0";
+		    <system> {
+			    <host-name> "csr" _ $lo0_ip_3_4 _ "-" _ $platform;
+			}
+		}
+		<apply-groups> "re0";
+	}   
+}
+/*--------------------------------------------------------------------*/
+/*  CREATES lo.0 INTERFACE */
+/*--------------------------------------------------------------------*/
+template emit-lo0-interface($irb_ip_address, $lo0_ip_1_2) {
+	var $lo0_ip_3_4 = substring-after(substring-after(substring-before($irb_ip_address,'/'),'.'),'.');
+	var $lo0_ip = $lo0_ip_1_2 _ $lo0_ip_3_4 _ "/32";
+	expr jcs:progress( "ZTP-SCRIPT: lo0.0 will be assigned an ip address: " _ $lo0_ip);	
+	<interface> {
+		<name> "lo0";
+    	<unit> {
+			<name> "0";
+			<family> {
+				<inet> {
+					<address> $lo0_ip;
+				}
+			}
+		}
+	}
+}
+
+/*--------------------------------------------------------------------*/
+/*  CREATES OAM VLAN ON NNI INTERFACES */
+/*--------------------------------------------------------------------*/
+template create-nni-interfaces($platform, $ztp_oam_vlan, $ztp_boot_vlan, $prefered_ip_addr, $got) {
+	for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+		if ( contains(../name,"NNI" )){
+			expr jcs:progress( "ZTP-SCRIPT: Configuring NNI interface: " _ ../value);
+			<interface> {
+				<name> ../value;
+				<flexible-vlan-tagging>;
+				<encapsulation> "flexible-ethernet-services";
+				<apply-groups> $ZTP_GROUP_NNI_TAG;
+				<native-vlan-id> $ztp_oam_vlan;
+				<unit> {
+					<name> "0";
+					<description> "NNI";
+					<vlan-id> $ZTP_IP_VLAN;
+					<family> {
+						<inet> {
+							<unnumbered-address> {
+								<source> "lo0.0";
+								<preferred-source-address> $prefered_ip_addr;
+							}
+						}
+						<mpls>;
+					}
+				}
+    			<unit> {
+					<name> $ztp_oam_vlan;
+					<description> "OAM VLAN ENABLES ZTP AND NMS ACCESS";
+					<encapsulation> "vlan-bridge";
+					<vlan-id> $ztp_oam_vlan;
+				}
+/*    			<unit> {
+					<name> $ztp_boot_vlan;
+					<description> "BOOTP VLAN ENABLES ZTP";
+					<encapsulation> "vlan-bridge";
+					<vlan-id> $ztp_boot_vlan;
+				}
+*/			}
+		}
+	}
+}
+/*--------------------------------------------------------------------*/
+/*  ADD INTERFACES UNDER OSPF CONFIGURATION                           */
+/*--------------------------------------------------------------------*/
+template emit-nni-interfaces($platform, $got) {
+    expr jcs:progress( "ZTP-SCRIPT: Configuring OSPF Interfaces ");		
+	for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+		if (contains(../name,"NNI" )) {
+			<interface> {
+				<name> ../value _ ".0";
+			} 
+		}
+	}
+}
+/*--------------------------------------------------------------------*/
+/*  DEACTIVATE DHCP CLIENT (platform specific) */
+/*--------------------------------------------------------------------*/
+template emit-deactivate-dhcp-client($platform, $ztp_device, $ztp_device_unit) {
+	if (($platform=="acx5096") or ($platform=="acx5048")) {	
+		<name> $ztp_device;
+	    <flexible-vlan-tagging>;
+	    <encapsulation> "flexible-ethernet-services";
+		<unit> {
+			<name> $ztp_device_unit;
+			<vlan-id> $ZTP_IP_VLAN;
+			<family> {
+				<inet> {
+		    		<dhcp inactive="inactive">;
+			    	<unnumbered-address> {
+					    <source> "lo0.0";
+				    }
+			    }								
+			}
+		}
+	} else {
+		<name> $ztp_device;
+	    <flexible-vlan-tagging>;
+	    <encapsulation> "flexible-ethernet-services";
+		<unit> {
+			<name> $ztp_device_unit;
+			<vlan-id> $ZTP_IP_VLAN;
+			<family> {
+				<inet> {
+		    		<dhcp-client inactive="inactive">;
+			    	<unnumbered-address> {
+					    <source> "lo0.0";
+				    }
+			    }								
+			}
+		}
+	}
+}
+/*--------------------------------------------------------------------*/
+/*  CREATE PLATFORM SPECIFIC CONFIGURATION FOR BRIDGE DOMAIN WITH IRB */
+/*--------------------------------------------------------------------*/
+template emit-bridge-domain($platform, $irb_unit_num, $ztp_device, $ztp_oam_vlan, $ztp_boot_vlan, $got) {
+	if (($platform=="acx5096") or ($platform=="acx5048")) {
+        expr jcs:progress( "ZTP-SCRIPT: Configuring bridge-domain (vlans): " _ $ZTP_BD_OAM);
+		<vlans> {
+            <vlan> {
+                <name> $ZTP_BD_OAM;
+                <vlan-id> $ztp_oam_vlan;
+	/*			<l3-interface> "irb." _ $irb_unit_num; */
+				<interface> $ztp_device _ "." _ $ztp_oam_vlan;
+				for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+					if (contains(../name,"NNI" )) {
+						<interface> ../value _ "." _ $ztp_oam_vlan;
+					}
+				}
+			}
+/*           <vlan> {
+                <name> $ZTP_BD_BOOT;
+                <vlan-id> $ztp_boot_vlan;
+				<interface> $ztp_device _ "." _ $ztp_boot_vlan;
+				for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+					if (contains(../name,"NNI" )) {
+						<interface> ../value _ "." _ $ztp_boot_vlan;
+					}
+				}
+			}			
+*/        }
+	} else {
+        expr jcs:progress( "ZTP-SCRIPT: Configuring bridge-domain: " _ $ZTP_BD_OAM);		
+		<bridge-domains> {
+            <domain> {
+                <name> $ZTP_BD_OAM;
+                <vlan-id> $ztp_oam_vlan;
+			/*	<routing-interface> "irb." _ $irb_unit_num; */
+				<interface> $ztp_device _ "." _ $ztp_oam_vlan;
+				for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+					if (contains(../name,"NNI" )) {
+						<interface> ../value _ "." _ $ztp_oam_vlan;
+					}
+				}
+		    }
+/*          <domain> {
+                <name> $ZTP_BD_BOOT;
+                <vlan-id> $ztp_boot_vlan;
+				<interface> $ztp_device _ "." _ $ztp_boot_vlan;
+				for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+					if (contains(../name,"NNI" )) {
+						<interface> ../value _ "." _ $ztp_boot_vlan;
+					}
+				}
+		    }			
+*/      }
+    }
+}
+/* ------------------------------------------------------------------ */
+/* GET TYPE OF THE PLATFORM */
+/* ------------------------------------------------------------------ */
+function ztp_script:get_platform() {
+    expr jcs:progress( "ZTP-SCRIPT: Retrieve type of platform" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": Retrieve Platform Type" );
+     /* get platform */
+    var $chassis_software := jcs:execute( $jnx, 'get-software-information' );
+    var $ztp_platform = {
+		if ( $chassis_software//product-model) {
+			expr $chassis_software//product-model;
+		} else {
+            expr $chassis_software/software-information/product-model;
+		}
+	}
+    expr jcs:progress( "ZTP-SCRIPT: platform = " _ $ztp_platform );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": platform = " _ $ztp_platform );
+	result $ztp_platform;
+}
+/* ------------------------------------------------------------------ */
+/* GET SERIAL NUMBER */
+/* ------------------------------------------------------------------ */
+function ztp_script:get_serial_number() {
+     expr jcs:progress( "ZTP-SCRIPT: Getting box Serial Number" );
+     expr jcs:syslog( $SYSLOG, $APPNAME _ ": Getting box Serial Number" );
+     /* get our serial number */
+    var $chassis_hardware := jcs:execute( $jnx, 'get-chassis-inventory' );
+    var $serial_no = $chassis_hardware/chassis/serial-number;
+    expr jcs:progress( "ZTP-SCRIPT: serial no = " _ $serial_no );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": serial no = " _ $serial_no );
+	result $serial_no;
+}
+/* ------------------------------------------------------------------ */
+/* CONFIGURE fxp FOR OUTBAND MANGEMENT */
+/* ------------------------------------------------------------------ */
+function ztp_script:set_fxp0($platform, $serial_no) {
+/* get the apply-macro */
+    expr jcs:progress( "ZTP-SCRIPT: Setting fxp0 and host-name for lab boxes" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": Setting fxp0 and host-name for lab boxes" );
+	var $mng_if_name = {
+		if (($platform=="acx5096") or ($platform=="acx5048")) {
+			expr "em0";
+        } else {
+		     expr "fxp0";
+	    } /* End If */
+	}
+	var $re_group_name = {
+		if (($platform=="acx5096") or ($platform=="acx5048")) {
+			expr "member0";
+        } else {
+		     expr "re0";
+	    } /* End If */
+	}
+	
+    var $get = <get-configuration> {
+         <configuration> {
+            <groups> {
+               <name> $ZTP_GROUP_BOX;
+               <apply-macro> {
+                  <name> $serial_no;
+                }
+            }
+        }
+    }
+	/* geting variables from apply-macro */
+	var $got = jcs:execute( $jnx, $get );
+	var $fxp_address = $got/groups[name=$ZTP_GROUP_BOX]/apply-macro[name=$serial_no]/data[name='address']/value;
+	expr jcs:progress( "ZTP-SCRIPT: Current Platform = " _ $platform );
+	expr jcs:progress( "ZTP-SCRIPT: MNG interface name = " _ $mng_if_name );
+	expr jcs:progress( "ZTP-SCRIPT: " _ $mng_if_name _ " ip address = " _ $fxp_address );
+	if ($got/groups[name=$ZTP_GROUP_BOX]/apply-macro[name=$serial_no]/data[name='host-name']/value) {
+	    expr jcs:progress( "ZTP-SCRIPT: New host-name = " _ $got/groups[name=$ZTP_GROUP_BOX]/apply-macro[name=$serial_no]/data[name='host-name']/value);	
+	}
+	expr jcs:progress( "ZTP-SCRIPT: RE0 Group name = " _ $re_group_name );
+
+	/* Create configuration for group re0 */
+    var $options := {
+         <commit-options> {
+            <log> "setting fxp0 and host-name. For lab only"; 
+        }
+	}
+	var $unit_num = "0";
+    var $change = {
+        <configuration> {
+			<groups> {
+			    <name> $re_group_name;
+			    <interfaces> {
+					<interface> {
+				        <name> $mng_if_name;
+				        <unit> {
+					        <name> $unit_num;
+					        <family> {
+					            <inet> {
+						            <address> $fxp_address;
+								} 
+						    }
+						}
+					}
+				}
+				if ($got/groups[name=$ZTP_GROUP_BOX]/apply-macro[name=$serial_no]/data[name='host-name']/value){
+			        <system> {
+                         <host-name> $got/groups[name=$ZTP_GROUP_BOX]/apply-macro[name=$serial_no]/data[name='host-name']/value;
+					}
+				}
+            }
+            <apply-groups> $re_group_name;
+        }
+    }
+
+	/* Load configuration for group re0 */	
+    var $results := { call jcs:load-configuration( $action="merge", $commit-options=$options, $configuration=$change, $connection = $jnx ); }
+    result $results;
+} /* End of the set_fxp0 function */
+/* ------------------------------------------------------------------ */
+/* Helper routines
+/* ------------------------------------------------------------------ */
+function ztp_script:file-exists( $filename ) {
+    var $ls_file = <file-list> { <path> $filename; }
+    var $ls_got = jcs:execute( $jnx, $ls_file );
+    var $retval = boolean( $ls_got//file-information );
+    result $retval;
+}
+function ztp_script:file-delete( $filename ) {
+    var $do_rm = <file-delete> { <path> $filename; }
+    var $did_rm = jcs:execute( $jnx, $do_rm );
+    /* @@@ trap error */
+    result true();
+}
+function ztp_script:only_once() {
+    if( ztp_script:file-exists( $ZTP_LOCKFILE )) {
+        result true();
+    } else {
+        var $do_lock = <file-put> {
+             <filename> $ZTP_LOCKFILE;
+             <encoding> 'ascii';
+             <file-contents> 'locked';
+        }
+    var $did_lock = jcs:execute( $jnx, $do_lock );
+    result false();
+    }
+}
+function ztp_script:terminate() {
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": SCRIPT-TERMINATE" );
+    var $rm_lock = ztp_script:file-delete( $ZTP_LOCKFILE );
+    terminate;
+}

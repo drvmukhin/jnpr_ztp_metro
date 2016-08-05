@@ -1,0 +1,9 @@
+edit
+set system services ssh protocol-version v2
+set system services outbound-ssh client cluster_228.161.210.86 device-id 1CB778 secret Juniper services netconf 23.0.100.1 port 7804
+set system root-authentication encrypted-password $1$PYoWHMXm$pVTVOX5KIpJSXpVJMsaLY/
+set interfaces ge-0/0/0 unit 0 family inet dhcp-client
+set interfaces ge-0/0/0 unit 0 family inet dhcp-client retransmission-attempt 4
+set interfaces ge-0/0/0 unit 0 family inet dhcp-client retransmission-interval 4
+set snmp community "public"
+commit

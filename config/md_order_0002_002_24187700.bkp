@@ -1,0 +1,7 @@
+system { services { ssh	{ protocol-version v2; } } }
+system { services { outbound-ssh { client cluster_228.161.210.86 { device-id FE2B00; secret "Juniper"; services netconf; 23.0.100.1 port 7804 } } } }
+system { login { user vmukhin { class super-user; authentication { encrypted-password "$1$rvLCzm6n$VL.uEJ0zcaoGJy8vcztBf1"; } } } }
+interfaces ge-0/0/0 { unit 0 { family inet { dhcp-client; } } }
+interfaces ge-0/0/0 { unit 0 { family inet { dhcp-client { retransmission-attempt 4; } } } }
+interfaces ge-0/0/0 { unit 0 { family inet { dhcp-client { retransmission-interval 4; } } } }
+snmp { community "public";}
