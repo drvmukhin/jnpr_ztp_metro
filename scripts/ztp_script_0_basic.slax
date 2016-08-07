@@ -22,10 +22,6 @@ ns str extension = "http://exslt.org/strings";
 ns ztp_script = "http://xml.juniper.com/ztp_script/1.0";
 import '../import/junos.xsl';
 /* ------------------------------------------------------------------ */
-/* Script parameters */
-/* ------------------------------------------------------------------ */
-/* param $server = '10.253.43.29'; */
-/* ------------------------------------------------------------------ */
 /* Constants */
 /* ------------------------------------------------------------------ */
 var $APPNAME = 'ztp_script[' _ $junos-context/pid _ ']';
@@ -275,7 +271,7 @@ var $get = <get-configuration> {
     } /* else */
 } /* end function */
 /* ------------------------------------------------------------------ */
-/* FUNCTION VERIVIES IF THERE IS A VALID MACROS FOR THE PLATFORM      */
+/* FUNCTION VERIFIES IF THERE IS A VALID MACROS FOR THE PLATFORM      */
 /* ------------------------------------------------------------------ */
 function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A", $serial_no = "N/A") {
 	var $get_grp = <get-configuration> {
