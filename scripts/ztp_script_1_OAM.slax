@@ -365,8 +365,6 @@ function ztp_script:set_dhcp_to_static($platform) {
         - Creates irb
         - Copies DHCP-client IP-address to static irb interface
     */
-    set $ring_ospf_area = "0.0." _ $ring_ospf_area;
-    expr jcs:progress( "ZTP-SCRIPT: Derived OSPF area: " _ $ring_ospf_area );
     var $ztp_device = substring-before($ztp_interface, '.');
     var $ztp_device_unit = substring-after($ztp_interface,'.');
     expr jcs:progress( "ZTP-SCRIPT: Parsing ZTP Interface: ifd=" _ $ztp_device _ " unit=" _ $ztp_device_unit );
