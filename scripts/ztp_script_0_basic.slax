@@ -22,9 +22,10 @@ ns str extension = "http://exslt.org/strings";
 ns ztp_script = "http://xml.juniper.com/ztp_script/1.0";
 import '../import/junos.xsl';
 /* ------------------------------------------------------------------ */
-/* Constants */
+/* Constants                                                          */
 /* ------------------------------------------------------------------ */
 var $APPNAME = 'ztp_script[' _ $junos-context/pid _ ']';
+var $JNPR_ZTP_SCRIPT = "ZTP-P0 SCRIPT";
 var $SYSLOG = 'user.info';
 var $TMPDIR = '/var/tmp';
 var $CODEDIR = '/var/tmp';
@@ -64,7 +65,7 @@ match / {
 	/*----------------------------------------------------------------*/
 	/* Check if configuration for the next ZTP PHASE exists */
 	if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_NAME, $ZTP_CONFIG_MACRO_NAME) ) ) {
-	expr jcs:progress( "ZTP-SCRIPT: Configuration file name for global template (phase 0) not specified. Stop at this point" );
+	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration file name for global template (phase 0) not specified. Stop at this point" );
 	var $die = ztp_script:terminate();
 	}
 	var $get = <get-configuration> {
@@ -82,10 +83,10 @@ match / {
 	/*  LOAD NEW ZTP PARAMETERS                              */
     /*-------------------------------------------------------*/
     if (not (ztp_script:load_config($ztp_config_file))) {
-        expr jcs:progress( "ZTP-SCRIPT: SCRIPT FAILED TO UPDATE ZTP CONFIG. CONFIG FILE NOT FOUND OR BAD CONFIGURATION");
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": SCRIPT FAILED TO UPDATE ZTP CONFIG. CONFIG FILE NOT FOUND OR BAD CONFIGURATION");
 	    var $die = ztp_script:terminate();
     } else {
-        expr jcs:progress( "ZTP-SCRIPT: ZTP CONFIG SUCCESSFULLY UPDATED" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP CONFIG SUCCESSFULLY UPDATED" );
 	}
     /*----------------------------------------------------------------*/
 	/*  Deactivate configuration group for PHASE-0                    */
@@ -102,7 +103,7 @@ match / {
 			if ( ztp_script:ztp_grp_exists($ZTP_GROUP_STAGE_1) ) {
 				<apply-groups> $ZTP_GROUP_STAGE_1;
 			} else {
-				expr jcs:progress( "ZTP-SCRIPT: Group name " _$ZTP_GROUP_STAGE_1 _ " with PHASE-1 script name and location NOT FOUND in global template. STOP ZTP AT THIS POINT" );
+				expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Group name " _$ZTP_GROUP_STAGE_1 _ " with PHASE-1 script name and location NOT FOUND in global template. STOP ZTP AT THIS POINT" );
 				var $die = ztp_script:terminate();
 			}
         }
@@ -111,17 +112,17 @@ match / {
     var $results_stage_0 := { call jcs:load-configuration( $action="merge", $commit-options=$options_s0, $configuration=$change_s0, $connection = $jnx ); }
     if ($results_stage_0//xnm:warning) {
         for-each ($results_stage_0//xnm:warning) {
-	        expr jcs:progress( "ZTP-SCRIPT: commit warning: " _ message );
+	        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit warning: " _ message );
         }
     }
 	if ($results_stage_0//xnm:error) {
         for-each ($results_stage_0//xnm:error) {
-            expr jcs:progress( "ZTP-SCRIPT: commit error: " _ message );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit error: " _ message );
         }
-	    expr jcs:progress( "ZTP-SCRIPT: ZTP PHACE 0 Script failed." );
+	    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHACE 0 Script failed." );
 		var $die = ztp_script:terminate();
     } else {
-        expr jcs:progress( "ZTP-SCRIPT: ZTP PHASE 0 COMPLITED SUCCESSFULLY" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 0 COMPLITED SUCCESSFULLY" );
 	}
     var $die = ztp_script:terminate();
 }
@@ -229,12 +230,12 @@ function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A") {
     }
 	/* Verification for the apply-macro */	
     if ($grp_flag != "exists") {
-		expr jcs:progress( "ZTP-SCRIPT: Can't find a group " _ $group_name);
+		expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Can't find a group " _ $group_name);
         result false();
 	} else {
-		expr jcs:progress( "ZTP-SCRIPT: Found a group " _ $group_name);
+		expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found a group " _ $group_name);
 		if ( $macro_name!="N/A") {
-	        expr jcs:progress( "ZTP-SCRIPT: Looking for apply-macro " _ $macro_name _ " in group " _ $group_name );
+	        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Looking for apply-macro " _ $macro_name _ " in group " _ $group_name );
 	        /* Look for apply-macro with specified name */
 	        var $get_mcr = <get-configuration> {
                 <configuration> {
@@ -257,10 +258,10 @@ function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A") {
             }
 	        /* Verification for the group */	
             if ($mcr_flag != "exists") {
-		        expr jcs:progress( "ZTP-SCRIPT: Can't find apply-macro " _ $macro_name );
+		        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Can't find apply-macro " _ $macro_name );
 		        result false();
 	        } else {
-		        expr jcs:progress( "ZTP-SCRIPT: Found apply-macro " _ $macro_name );
+		        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found apply-macro " _ $macro_name );
 			    result true();
 	        }		
 	    } else {
