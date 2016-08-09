@@ -1,13 +1,13 @@
 version 1.1;
 /* ------------------------------------------------------------------ */
 /* This program performs Zero touch provisioning for the ACX platform */
-/* It will set up OAM VLAN and Bridge Domain to allow permanent       */
-/* management access to the box.  */
+/* It will load global configuration template from a remote location  */
+/* specified in the original configuration file loaded as a result    */
+/* of the autoconfiguration process.                                  */
 /* */
-/* Version 1.0 Vasily Mukhin vmukhin@juniper.net */
-/* Based on jctyztp script by Jeremy Schulman and Brian Sherwood */
+/* Version 1.1 Vasily Mukhin vmukhin@juniper.net                      */
+/* Based on jctyztp script by Jeremy Schulman and Brian Sherwood      */
 /* */
-/* ------------------------------------------------------------------ */
 /* ------------------------------------------------------------------ */
 /* XML namespaces */
 /* ------------------------------------------------------------------ */
@@ -60,11 +60,11 @@ match / {
     expr jcs:syslog( $SYSLOG, $APPNAME _ ": SCRIPT-BEGIN" );
     expr jcs:progress( "SCRIPT-BEGIN" );
     /*----------------------------------------------------------------*/
-    /*      STAGE#0: LOAD STANDART CSR TEMPLATE                       */
+    /*      PHASE-0: LOAD GLOBAL CSR TEMPLATE                         */
 	/*----------------------------------------------------------------*/
-	/* Check if configuration for the next ZTP STAGE exists */
+	/* Check if configuration for the next ZTP PHASE exists */
 	if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_NAME, $ZTP_CONFIG_MACRO_NAME) ) ) {
-	expr jcs:progress( "ZTP-SCRIPT: No configuration for the next ZTP phase exists. Stop at this point" );
+	expr jcs:progress( "ZTP-SCRIPT: Configuration file name for global template (phase 0) not specified. Stop at this point" );
 	var $die = ztp_script:terminate();
 	}
 	var $get = <get-configuration> {
@@ -76,25 +76,24 @@ match / {
     }
 	var $got = jcs:execute( $jnx, $get );
 	var $got_copy = $got;
-	/* global ztp parameters for AGN router */
+	/* global ztp parameters for access node */
 	var $ztp_config_file = $got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CONFIG_MACRO_NAME]/data[name=$ZTP_CONFIG]/value;	
 	/*-------------------------------------------------------*/
 	/*  LOAD NEW ZTP PARAMETERS                              */
     /*-------------------------------------------------------*/
     if (not (ztp_script:load_config($ztp_config_file))) {
         expr jcs:progress( "ZTP-SCRIPT: SCRIPT FAILED TO UPDATE ZTP CONFIG. CONFIG FILE NOT FOUND OR BAD CONFIGURATION");
-	    var $die = ztp_script:terminate();	
+	    var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( "ZTP-SCRIPT: ZTP CONFIG SUCCESSFULLY UPDATED" );
 	}
     /*----------------------------------------------------------------*/
-	/*  Deactivate configuration for STAGE#0                        */
-	/*  Activate   configuration for STAGE#1 if exists              */	
-	/*----------------------------------------------------------------*/
-    /* Create configuration*/	
+	/*  Deactivate configuration group for PHASE-0                    */
+	/*  Activate   configuration group for PHASE-1 if exists          */	
+	/*----------------------------------------------------------------*/	
 	var $options_s0 := {
         <commit-options> {
-            <log> "Enabling next ZTP stage"; 
+            <log> "Enabling ZTP PHASE-1"; 
         }
 	}
     var $change_s0 = {
@@ -103,7 +102,8 @@ match / {
 			if ( ztp_script:ztp_grp_exists($ZTP_GROUP_STAGE_1) ) {
 				<apply-groups> $ZTP_GROUP_STAGE_1;
 			} else {
-				expr jcs:progress( "ZTP-SCRIPT: NEXT STAGE CONFIGURATION NOT FOUND. STOP ZTP AT THIS POINT" );
+				expr jcs:progress( "ZTP-SCRIPT: Group name " _$ZTP_GROUP_STAGE_1 _ " with PHASE-1 script name and location NOT FOUND in global template. STOP ZTP AT THIS POINT" );
+				var $die = ztp_script:terminate();
 			}
         }
     }
@@ -118,7 +118,7 @@ match / {
         for-each ($results_stage_0//xnm:error) {
             expr jcs:progress( "ZTP-SCRIPT: commit error: " _ message );
         }
-	    expr jcs:progress( "ZTP-SCRIPT: Script failed." );
+	    expr jcs:progress( "ZTP-SCRIPT: ZTP PHACE 0 Script failed." );
 		var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( "ZTP-SCRIPT: ZTP PHASE 0 COMPLITED SUCCESSFULLY" );
@@ -126,7 +126,7 @@ match / {
     var $die = ztp_script:terminate();
 }
 /* ------------------------------------------------------------------ */
-/*   LOAD CONFIGURATION FROM FILE */
+/*   FUNCYION load_config LOADS CONFIGURATION FROM FILE               */
 /* ------------------------------------------------------------------ */
 function ztp_script:load_config($config_url, $action = "merge") {
 	mvar $load_config = true();
@@ -203,77 +203,11 @@ function ztp_script:load_config($config_url, $action = "merge") {
 	}
     result $load_config;	
 }
-/* ------------------------------------------------------------------ */
-/* Upgrade code */
-/* ------------------------------------------------------------------ */
-function ztp_script:upgrade_code() {
-/* get the apply-macro */
-var $get = <get-configuration> {
-         <configuration> {
-            <version>;
-            <groups> {
-               <name> $ZTP_GROUP_NAME;
-               <apply-macro> {
-                  <name> $ZTP_CODE_MACRO_NAME;
-                }
-            }
-        }
-    }
-    var $got = jcs:execute( $jnx, $get );
-    var $running_version = $got/version;
-    var $production_version = $got/groups[name=$ZTP_GROUP_NAME]/applymacro[
-    name=$ZTP_CODE_MACRO_NAME]/data[name='version']/value;
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": running_version = " _ $running_version);
-    expr jcs:progress( "running_version = " _ $running_version);
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": production_version = " _ $production_version);
-    expr jcs:progress( "production_version = " _ $production_version);
-    if ($running_version == $production_version) {
-        expr jcs:progress( "Code is up to date, no upgrade required");
-        expr jcs:syslog( $SYSLOG, $APPNAME _ ": Code is up to date, no upgrade required");
-        result false();
-    } else {
-        expr jcs:progress( "upgrade required");
-        expr jcs:trace("upgrade required");
-        for-each ($got/groups[name=$ZTP_GROUP_NAME]/applymacro[name=$ZTP_CODE_MACRO_NAME]/data[not(value)]/name) {
-            expr jcs:progress( "Processing " _ ../name );
-            /*
-            * var $filename = jcs:split('/' , ../name);
-            * var $last = count($filename);
-            * expr jcs:trace("filename = " _ $filename[$last] );
-            */
-            /* request system software add ... */
-           expr jcs:syslog( $SYSLOG, $APPNAME _ ": installing image" );
-           var $do_install := <request-package-add> {
-                                 <no-validate>;
-                                 <force>;
-                                 <reboot>;
-                                 <package-name> ../name ;
-            }
-            var $install_results = jcs:execute( $jnx, $do_install );
-            /* expr jcs:progress( "package-results = " _ $install_results/../package-result ); */
-            /*
-            * <exsl:document href="/tmp/foobar_install.xml"> {
-            * copy-of $install_results;
-            * }
-            *
-            */
-            for-each( $install_results/../output ) {
-                 expr jcs:syslog( $SYSLOG, $APPNAME _ ": Install Error: ", output );
-                 expr jcs:progress( "Install error: " _ output );
-            }
-            if ($install_results/../package-result == 0) {
-                /* successfully installed package -- terminate script and wait for reboot */
-                expr jcs:syslog( $SYSLOG, $APPNAME _ ": software installed" );
-                expr jcs:progress( "software installed" );
-                var $die = ztp_script:terminate();
-            }
-        } /* foreach software image */
-    } /* else */
-} /* end function */
-/* ------------------------------------------------------------------ */
-/* FUNCTION VERIFIES IF THERE IS A VALID MACROS FOR THE PLATFORM      */
-/* ------------------------------------------------------------------ */
-function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A", $serial_no = "N/A") {
+/* --------------------------------------------------------------------------------- */
+/* FUNCTION ztp_grp_exists VERIFIES IF  configuration group name and apply-macro name*/
+/* EXIST IN THE CONFIGURATION and RETURNES True or False 
+/* --------------------------------------------------------------------------------- */
+function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A") {
 	var $get_grp = <get-configuration> {
          <configuration> {
             <groups> {
@@ -309,7 +243,7 @@ function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A", $serial_no 
 			        }
 	            }
             }
-	        /* geting variables from apply-macro */
+	        /* getting variables from apply-macro */
 	        var $got_mcr = jcs:execute( $jnx, $get_mcr );
 	        mvar $mcr_flag = "skip";
 	        for-each ($got_mcr/groups[name=$group_name]/apply-macro/name) {
