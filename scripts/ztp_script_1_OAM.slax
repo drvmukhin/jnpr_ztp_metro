@@ -87,15 +87,16 @@ match / {
     expr jcs:syslog( $SYSLOG, $APPNAME _ "Looking for " _ $platform _ " specific parameters." );
     if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_PLATFORM, $ZTP_MACRO_NAME_PREFIX _ $platform) ) ) {
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Failed to find platform specific ZTP parameters in global template." );
-	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Exiting ztp_script now." );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Make sure that apply-macro " _ $ZTP_MACRO_NAME_PREFIX _ $platform _ " exists under " _ $ZTP_GROUP_PLATFORM _ " group in global template." );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Exiting ztp_script now." );
     var $die = ztp_script:terminate();
     }
-	/* Creating static configuration and enabling management access to the node */
+    /* Creating static configuration and enabling management access to the node */
     /* 
         0. Read parameters assigned dynamically via DHCP:
            - ip address and mask a.b.c.d/n
-           - default route		   
-		1. Create host-name: csr<c.d>-<platform>)
+           - default route         
+        1. Create host-name: csr<c.d>-<platform>)
         2. Creates OAM VLAN on NNIs:
             - NNIs are listed under apply-macros (platform specific list)
         3. Creates IRB interfaces
@@ -104,7 +105,7 @@ match / {
         5. Creates OAM Bridge-domain and placess following interfaces into it
             - NNI IFLs
             - IRB
-		6. Enables VSTP and LLDP protocols on NNI interfaces
+        6. Enables VSTP and LLDP protocols on NNI interfaces
     */
     var $results_step_1 = ztp_script:set_dhcp_to_static($platform); 
     if ($results_step_1//xnm:warning) {
@@ -129,27 +130,27 @@ match / {
     if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_BOX, $serial_no) ) ) {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuration for S/N: " _ $serial_no _ "was not found in global template. Skip this step." );
     }
-	else {
-		/* Configuring box specific parameters (fxp0 and host name) */
-		var $results_step_2 = ztp_script:set_box_specific_config($platform, $serial_no);
-		if ($results_step_2//xnm:warning) {
-			for-each ($results//xnm:warning) {
-				expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": set_box_specific_config() commit warning: " _ message );
-			}
-		}
-		if ($results_step_2//xnm:error) {
-			for-each ($results_step_1//xnm:error) {
-				expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": set_box_specific_config() commit error: " _ message );
-			}
-			expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script failed." );
-			var $die = ztp_script:terminate();
-		} else {
-			expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuratIon committed successfully." );
-		}
-	}
+    else {
+        /* Configuring box specific parameters (fxp0 and host name) */
+        var $results_step_2 = ztp_script:set_box_specific_config($platform, $serial_no);
+        if ($results_step_2//xnm:warning) {
+            for-each ($results//xnm:warning) {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": set_box_specific_config() commit warning: " _ message );
+            }
+        }
+        if ($results_step_2//xnm:error) {
+            for-each ($results_step_1//xnm:error) {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": set_box_specific_config() commit error: " _ message );
+            }
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script failed." );
+            var $die = ztp_script:terminate();
+        } else {
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuratIon committed successfully." );
+        }
+    }
     if ( ztp_script:ztp_grp_exists($ZTP_GROUP_BOX) ) {
-		/* Deleting configuration group box specific settings */
-		var $ztp_rm_grp_2 = ztp_script:remove_old_cfg($ZTP_GROUP_BOX);
+        /* Deleting configuration group box specific settings */
+        var $ztp_rm_grp_2 = ztp_script:remove_old_cfg($ZTP_GROUP_BOX);
     }
     expr jcs:syslog( $SYSLOG, $APPNAME _ ": COMPLITED SUCCESSFULLY" );
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": COMPLITED SUCCESSFULLY" );

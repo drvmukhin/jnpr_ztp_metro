@@ -62,93 +62,93 @@ match / {
     expr jcs:progress( "SCRIPT-BEGIN" );
     /*----------------------------------------------------------------*/
     /*      PHASE-0: LOAD GLOBAL CSR TEMPLATE                         */
-	/*----------------------------------------------------------------*/
-	/* Check if configuration for the next ZTP PHASE exists */
-	if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_NAME, $ZTP_CONFIG_MACRO_NAME) ) ) {
-	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration file name for global template (phase 0) not specified. Stop at this point" );
-	var $die = ztp_script:terminate();
-	}
-	var $get = <get-configuration> {
+    /*----------------------------------------------------------------*/
+    /* Check if configuration for the next ZTP PHASE exists */
+    if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_NAME, $ZTP_CONFIG_MACRO_NAME) ) ) {
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration file name for global template (phase 0) not specified. Stop at this point" );
+    var $die = ztp_script:terminate();
+    }
+    var $get = <get-configuration> {
          <configuration> {
             <groups> {
                <name> $ZTP_GROUP_NAME;
             }
         }
     }
-	var $got = jcs:execute( $jnx, $get );
-	var $got_copy = $got;
-	/* global ztp parameters for access node */
-	var $ztp_config_file = $got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CONFIG_MACRO_NAME]/data[name=$ZTP_CONFIG]/value;	
-	/*-------------------------------------------------------*/
-	/*  LOAD NEW ZTP PARAMETERS                              */
+    var $got = jcs:execute( $jnx, $get );
+    var $got_copy = $got;
+    /* global ztp parameters for access node */
+    var $ztp_config_file = $got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CONFIG_MACRO_NAME]/data[name=$ZTP_CONFIG]/value; 
+    /*-------------------------------------------------------*/
+    /*  LOAD NEW ZTP PARAMETERS                              */
     /*-------------------------------------------------------*/
     if (not (ztp_script:load_config($ztp_config_file))) {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": SCRIPT FAILED TO UPDATE ZTP CONFIG. CONFIG FILE NOT FOUND OR BAD CONFIGURATION");
-	    var $die = ztp_script:terminate();
+        var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP CONFIG SUCCESSFULLY UPDATED" );
-	}
+    }
     /*----------------------------------------------------------------*/
-	/*  Deactivate configuration group for PHASE-0                    */
-	/*  Activate   configuration group for PHASE-1 if exists          */	
-	/*----------------------------------------------------------------*/	
-	var $options_s0 := {
+    /*  Deactivate configuration group for PHASE-0                    */
+    /*  Activate   configuration group for PHASE-1 if exists          */    
+    /*----------------------------------------------------------------*/    
+    var $options_s0 := {
         <commit-options> {
             <log> "Enabling ZTP PHASE-1"; 
         }
-	}
+    }
     var $change_s0 = {
         <configuration> {
             <apply-groups delete = "delete"> $ZTP_GROUP_STAGE_0;
-			if ( ztp_script:ztp_grp_exists($ZTP_GROUP_STAGE_1) ) {
-				<apply-groups> $ZTP_GROUP_STAGE_1;
-			} else {
-				expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Group name " _$ZTP_GROUP_STAGE_1 _ " with PHASE-1 script name and location NOT FOUND in global template. STOP ZTP AT THIS POINT" );
-				var $die = ztp_script:terminate();
-			}
+            if ( ztp_script:ztp_grp_exists($ZTP_GROUP_STAGE_1) ) {
+                <apply-groups> $ZTP_GROUP_STAGE_1;
+            } else {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Group name " _$ZTP_GROUP_STAGE_1 _ " with PHASE-1 script name and location NOT FOUND in global template. STOP ZTP AT THIS POINT" );
+                var $die = ztp_script:terminate();
+            }
         }
     }
-    /* Load configuration */	
+    /* Load configuration */    
     var $results_stage_0 := { call jcs:load-configuration( $action="merge", $commit-options=$options_s0, $configuration=$change_s0, $connection = $jnx ); }
     if ($results_stage_0//xnm:warning) {
         for-each ($results_stage_0//xnm:warning) {
-	        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit warning: " _ message );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit warning: " _ message );
         }
     }
-	if ($results_stage_0//xnm:error) {
+    if ($results_stage_0//xnm:error) {
         for-each ($results_stage_0//xnm:error) {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit error: " _ message );
         }
-	    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHACE 0 Script failed." );
-		var $die = ztp_script:terminate();
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHACE 0 Script failed." );
+        var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 0 COMPLITED SUCCESSFULLY" );
-	}
+    }
     var $die = ztp_script:terminate();
 }
 /* ------------------------------------------------------------------ */
 /*   FUNCYION load_config LOADS CONFIGURATION FROM FILE               */
 /* ------------------------------------------------------------------ */
 function ztp_script:load_config($config_url, $action = "merge") {
-	mvar $load_config = true();
-	var $phrase = {
-		if ($action == "merge") {
-			expr "merged to existed configuration";
-		} else {
-			if ($action == "replace") {
-				expr " and replace existed statements";
-			} else {
-				expr " be merged (default action) to existed configuration";
-			}
-		}
-	}
-	var $new_action = {
-		if (($action == "merge") or ($action == "replace")) {
-			expr $action;
-		} else {
+    mvar $load_config = true();
+    var $phrase = {
+        if ($action == "merge") {
+            expr "merged to existed configuration";
+        } else {
+            if ($action == "replace") {
+                expr " and replace existed statements";
+            } else {
+                expr " be merged (default action) to existed configuration";
+            }
+        }
+    }
+    var $new_action = {
+        if (($action == "merge") or ($action == "replace")) {
+            expr $action;
+        } else {
             expr "merge";
-		}
-	}
+        }
+    }
     expr jcs:progress( "Config file: " _ $config_url _ " will be loaded and " _ $phrase  );
     /* lock the config */
     var $lock = <lock-configuration>;
@@ -161,7 +161,7 @@ function ztp_script:load_config($config_url, $action = "merge") {
         expr jcs:progress( "Got config lock" );
     }
     if ($load_config) {       
-	    set $load_config = false();
+        set $load_config = false();
         expr jcs:progress( "Processing config url " _ $config_url );
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": Processing config url " _ $config_url );
         /* load in new config */
@@ -191,84 +191,84 @@ function ztp_script:load_config($config_url, $action = "merge") {
                 var $unlock = <unlock-configuration>;
                 var $did_unlock = jcs:execute( $jnx, $unlock );
                 expr jcs:progress( "release config lock" );
-				set $load_config = true();
+                set $load_config = true();
                 /*var $die = ztp_script:terminate();*/
             }
         }
     } /* end of foreach config_url */
-	if (not($load_config)) {
-		/* if we make it here, we failed to load the config */
+    if (not($load_config)) {
+        /* if we make it here, we failed to load the config */
         var $unlock = <unlock-configuration>;
         var $did_unlock = jcs:execute( $jnx, $unlock );
         expr jcs:progress( "release config lock" );
-	}
-    result $load_config;	
+    }
+    result $load_config;    
 }
 /* --------------------------------------------------------------------------------- */
 /* FUNCTION ztp_grp_exists VERIFIES IF  configuration group name and apply-macro name*/
 /* EXIST IN THE CONFIGURATION and RETURNES True or False 
 /* --------------------------------------------------------------------------------- */
 function ztp_script:ztp_grp_exists($group_name, $macro_name = "N/A") {
-	var $get_grp = <get-configuration> {
+    var $get_grp = <get-configuration> {
          <configuration> {
             <groups> {
-				<name>;
-			}
-	    }
+                <name>;
+            }
+        }
     }
-	/* geting variables from apply-macro */
-	var $got_grp = jcs:execute( $jnx, $get_grp );
-	mvar $grp_flag = "skip";
-	for-each ($got_grp/groups/name) {
-		set $grp_flag = {
-			if  ((../name!=$group_name) and ($grp_flag!="exists")) {
-			    expr "skip";
-			} else {
-				expr "exists";
-			} /* End if */
-		}
+    /* geting variables from apply-macro */
+    var $got_grp = jcs:execute( $jnx, $get_grp );
+    mvar $grp_flag = "skip";
+    for-each ($got_grp/groups/name) {
+        set $grp_flag = {
+            if  ((../name!=$group_name) and ($grp_flag!="exists")) {
+                expr "skip";
+            } else {
+                expr "exists";
+            } /* End if */
+        }
     }
-	/* Verification for the apply-macro */	
+    /* Verification for the apply-macro */  
     if ($grp_flag != "exists") {
-		expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Can't find a group " _ $group_name);
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Can't find a group " _ $group_name);
         result false();
-	} else {
-		expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found a group " _ $group_name);
-		if ( $macro_name!="N/A") {
-	        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Looking for apply-macro " _ $macro_name _ " in group " _ $group_name );
-	        /* Look for apply-macro with specified name */
-	        var $get_mcr = <get-configuration> {
+    } else {
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found a group " _ $group_name);
+        if ( $macro_name!="N/A") {
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Looking for apply-macro " _ $macro_name _ " in group " _ $group_name );
+            /* Look for apply-macro with specified name */
+            var $get_mcr = <get-configuration> {
                 <configuration> {
                     <groups> {
-				        <name> $group_name;
-			        }
-	            }
+                        <name> $group_name;
+                    }
+                }
             }
-	        /* getting variables from apply-macro */
-	        var $got_mcr = jcs:execute( $jnx, $get_mcr );
-	        mvar $mcr_flag = "skip";
-	        for-each ($got_mcr/groups[name=$group_name]/apply-macro/name) {
-		        set $mcr_flag = {
-			        if  ((../name!=$macro_name) and ($mcr_flag!="exists")) {
-			            expr "skip";
-			        } else {
-				        expr "exists";
-			        } /* End if */
-		        }
+            /* getting variables from apply-macro */
+            var $got_mcr = jcs:execute( $jnx, $get_mcr );
+            mvar $mcr_flag = "skip";
+            for-each ($got_mcr/groups[name=$group_name]/apply-macro/name) {
+                set $mcr_flag = {
+                    if  ((../name!=$macro_name) and ($mcr_flag!="exists")) {
+                        expr "skip";
+                    } else {
+                        expr "exists";
+                    } /* End if */
+                }
             }
-	        /* Verification for the group */	
+            /* Verification for the group */    
             if ($mcr_flag != "exists") {
-		        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Can't find apply-macro " _ $macro_name );
-		        result false();
-	        } else {
-		        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found apply-macro " _ $macro_name );
-			    result true();
-	        }		
-	    } else {
-			result true();
-		}
-	}	
-}	
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Can't find apply-macro " _ $macro_name );
+                result false();
+            } else {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found apply-macro " _ $macro_name );
+                result true();
+            }       
+        } else {
+            result true();
+        }
+    }   
+}   
 /* ------------------------------------------------------------------ */
 /* Helper routines
 /* ------------------------------------------------------------------ */
