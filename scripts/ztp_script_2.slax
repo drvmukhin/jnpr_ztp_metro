@@ -16,8 +16,7 @@ version 1.1;
 /* Version 1.1 Vasily Mukhin vmukhin@juniper.net                      */
 /* Based on jctyztp script by Jeremy Schulman and Brian Sherwood      */
 /* ------------------------------------------------------------------ */
-/* XML namespaces */
-/* ------------------------------------------------------------------ */
+/* XML namespaces*/
 /* Juniper */
 ns junos = "http://xml.juniper.net/junos/*/junos";
 ns xnm = "http://xml.juniper.net/xnm/1.1/xnm";
@@ -35,14 +34,15 @@ var $APPNAME = 'ztp_script[' _ $junos-context/pid _ ']';
 var $SYSLOG = 'user.info';
 var $TMPDIR = '/var/tmp';
 var $CODEDIR = '/var/tmp';
-var $JNPR_ZTP_SCRIPT = "ZTP-P2 SCRIPT";
+var $JNPR_ZTP_SCRIPT = "ZTP Phase 2 SCRIPT";
 var $ZTP_GROUP_SCENARIOS = "GR-ZTP-SCENARIOS";
-var $ZTP_SCENARIO = "SCANARIO-1";
+var $ZTP_SCENARIO = "SCENARIO-1";
 var $ZTP_METHOD = "METHOD";
+var $ZTP_GROUP_NAME = "GR-ZTP";
+var $ZTP_CODE_MACRO_NAME = "CODE";
 var $ZTP_GROUP_PLATFORM = "GR-ZTP-PLATFORM";
 var $ZTP_GROUP_BOX = "GR-ZTP-BOX";
 var $ZTP_GROUP_CALLHOME = "GR-ZTP-CALLHOME";
-var $ZTP_CODE_MACRO_NAME = "CODE";
 var $ZTP_CONFIG_MACRO_NAME = "CONFIG";
 var $ZTP_CALLHOME_MACRO_NAME = "CALLHOME";
 var $ZTP_MACRO_NAME_PREFIX = "ZTP-";
@@ -75,12 +75,12 @@ match / {
         expr jcs:output( $APPNAME _ ": process already running, backing off" );
         terminate;
     }
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": SCRIPT-BEGIN" );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": SCRIPT-BEGIN" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BEGIN" );
     /*-----------------------------------------------------------------*/
     /*     VERIFY WHAT MODEL IS USED - PULL or PUSH                    */
     /*-----------------------------------------------------------------*/
-    var $ztp_method = ztp_script:ztp_get_method($ZTP_GROUP_SCENARIOS, $ZTP_SCENARIO)
+    var $ztp_method = ztp_script:ztp_get_method($ZTP_GROUP_SCENARIOS, $ZTP_SCENARIO);
     if ( $ztp_method == "pull" ) {
         /* Proceed with pull model work flow */
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Pull model is in use." );
@@ -399,7 +399,7 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
         }
         /* getting variables from apply-macro */
         var $got_grp = jcs:execute( $jnx, $get_grp );
-        for-each ($got/groups[name=$group_name]/apply-macro[name=$macro_name]/data/name) {
+        for-each ($got_grp/groups[name=$group_name]/apply-macro[name=$macro_name]/data/name) {
             set $ztd_method = {
                 if (../name == $ZTP_METHOD ) {
                     expr ../value;
@@ -411,7 +411,7 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
 }  
 /* ------------------------------------------------------------------ */
 /* Function upgrade_code() checks the currently running Junos version */
-/* and upgrades the code                                                  */
+/* and upgrades the code                                              */
 /* ------------------------------------------------------------------ */
 function ztp_script:upgrade_code() {
 /* get the apply-macro */

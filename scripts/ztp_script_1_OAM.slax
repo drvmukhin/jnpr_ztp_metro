@@ -33,7 +33,7 @@ import '../import/junos.xsl';
 /* Constants                                                          */
 /* ------------------------------------------------------------------ */
 var $APPNAME = 'ztp_script[' _ $junos-context/pid _ ']';
-var $JNPR_ZTP_SCRIPT = "ZTP-P1 SCRIPT";
+var $JNPR_ZTP_SCRIPT = "ZTP Phase 1 SCRIPT";
 var $SYSLOG = 'user.info';
 var $TMPDIR = '/var/tmp';
 var $CODEDIR = '/var/tmp';
@@ -75,7 +75,7 @@ match / {
         expr jcs:output( $APPNAME _ ": process already running, backing off" );
         terminate;
     }
-    expr jcs:syslog( $SlYSLOG, $APPNAME _ ": BEGIN" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BEGIN" );
     var $serial_no = ztp_script:get_serial_number();
     var $platform = ztp_script:get_platform();

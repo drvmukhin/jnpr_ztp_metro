@@ -25,7 +25,7 @@ import '../import/junos.xsl';
 /* Constants                                                          */
 /* ------------------------------------------------------------------ */
 var $APPNAME = 'ztp_script[' _ $junos-context/pid _ ']';
-var $JNPR_ZTP_SCRIPT = "ZTP-P0 SCRIPT";
+var $JNPR_ZTP_SCRIPT = "ZTP Phase 0 SCRIPT";
 var $SYSLOG = 'user.info';
 var $TMPDIR = '/var/tmp';
 var $CODEDIR = '/var/tmp';
