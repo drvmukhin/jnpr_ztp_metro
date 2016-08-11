@@ -46,12 +46,10 @@ var $ZTP_GROUP_NNI_TAG = "GR-NNI-TAG";
 var $ZTP_GROUP_AGG_NNI_TAG = "GR-AGG-INTF-TAG";
 var $ZTP_GROUP_STAGE_1 = "GR-ZTP-STAGE-1";
 var $ZTP_GROUP_STAGE_2 = "GR-ZTP-STAGE-2";
-var $ZTP_GROUP_OSPF = "GR-OSPF";
-var $ZTP_OSPF_AREA = "AREA";
+var $ZTP_HOSTNAME = "HOST_NAME";
 var $ZTP_BD_OAM = "BD-ZTP-OAM";
 var $ZTP_BD_BOOT = "BD-ZTP-BOOTP";
 var $ZTP_OAM_VLAN = "OAM_VLAN";
-var $ZTP_LOOPBACK = "Lo0";
 var $ZTP_LOCKFILE = '/tmp/ztp_script.lock';
 var $ZTP_IP_VLAN = "1";
 /* ------------------------------------------------------------------ */
@@ -363,8 +361,19 @@ function ztp_script:set_dhcp_to_static($platform) {
     }
     /* getting variables from apply-macro */
     var $got = jcs:execute( $jnx, $get );
-    var $ztp_oam_vlan = $got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data[name=$ZTP_OAM_VLAN]/value;
-     
+/*    var $ztp_oam_vlan = $got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data[name=$ZTP_OAM_VLAN]/value; */
+    mvar $ztp_oam_vlan = "2";
+    mvar $ztp_host_prefix = "csr";	
+    for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
+		if (../name == $ZTP_OAM_VLAN ) {
+			set $ztp_oam_vlan = ../value;
+			expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": FOUND VLAN: " _ ../value );
+		}
+		if (../name == $ZTP_HOSTNAME ) {
+			set $ztp_host_prefix = ../value;
+			expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": FOUND HOST PREFIX: " _ ../value );
+		}	
+	}
      /* GET VALUES OF THE DHCP OPTIONS */
     var $get_dhcp_detail = <get-dhcp-client-binding-information> {
                                <detail>;
@@ -409,7 +418,7 @@ function ztp_script:set_dhcp_to_static($platform) {
     }
     /* - CREATE CONFIGURATION - */
     /*
-        - DeletEs DHCP-client configuration
+        - Deletes DHCP-client configuration
         - Creates OAM Bridge-domain
         - Configures OAM vlan-bridge unit on ZTP interface
         - Moves OAM unit into bridge domain
@@ -482,7 +491,7 @@ function ztp_script:set_dhcp_to_static($platform) {
                     }
                 }
             }
-            call create-re0-group($platform, $ip_3_4);
+            call create-re0-group($platform, $ip_3_4, $ztp_host_prefix);
         }
     }
     /* Load configuration for group re0 */  
@@ -492,12 +501,12 @@ function ztp_script:set_dhcp_to_static($platform) {
 /*--------------------------------------------------------------------*/
 /*  Template: create-re0-group - CREATES re0 group and a host-name    */
 /*--------------------------------------------------------------------*/
-template create-re0-group($platform, $ip_3_4) {
+template create-re0-group($platform, $ip_3_4, $ztp_host_prefix) {
     if (($platform=="acx5096") or ($platform=="acx5048")) { 
         <groups> {
             <name> "member0";
             <system> {
-                <host-name> "csr" _ $ip_3_4 _ "-" _ $platform;
+                <host-name> $ztp_host_prefix _ $ip_3_4 _ "-" _ $platform;
             }
         }
         <apply-groups> "member0";
@@ -505,7 +514,7 @@ template create-re0-group($platform, $ip_3_4) {
         <groups> {
             <name> "re0";
             <system> {
-                <host-name> "csr" _ $ip_3_4 _ "-" _ $platform;
+                <host-name> $ztp_host_prefix _ $ip_3_4 _ "-" _ $platform;
             }
         }
         <apply-groups> "re0";

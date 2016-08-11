@@ -127,7 +127,7 @@ match / {
     var $die = ztp_script:terminate();
 }
 /* ------------------------------------------------------------------ */
-/*   FUNCYION load_config LOADS CONFIGURATION FROM FILE               */
+/*   FUNCTION load_config LOADS CONFIGURATION FROM FILE               */
 /* ------------------------------------------------------------------ */
 function ztp_script:load_config($config_url, $action = "merge") {
     mvar $load_config = true();

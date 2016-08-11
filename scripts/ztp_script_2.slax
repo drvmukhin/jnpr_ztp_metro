@@ -394,12 +394,9 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
         /* getting variables from apply-macro */
         var $got_grp = jcs:execute( $jnx, $get_grp );
         for-each ($got_grp/groups[name=$group_name]/apply-macro[name=$macro_name]/data/name) {
-            
-                if (../name == $ZTP_METHOD ) {
-                    set $ztd_method = ../value;
-					expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Parameter name = " _ ../name _ " value = " _ ../value);
-                }
-            
+			if (../name == $ZTP_METHOD ) {
+				set $ztd_method = ../value;
+			}
         }
     }
     result $ztd_method;
