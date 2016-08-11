@@ -162,7 +162,7 @@ match / {
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Looking for box (S/N: " _ $serial_no _ ") specific parameters." );
     expr jcs:syslog( $SYSLOG, $APPNAME _ "Looking for box (S/N: " _ $serial_no _ ") specific parameters." );
     if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_BOX, $serial_no) ) ) {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuration for S/N: " _ $serial_no _ "was not found in global template. Skip this step." );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuration for S/N: " _ $serial_no _ " was not found in global template. Skip this step." );
     }
     else {
         /* Configuring box specific parameters (fxp0 and host name) */

@@ -58,8 +58,8 @@ match / {
         expr jcs:output( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
         terminate;
     }
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BEGIN" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": ZTP phase 0 BEGIN" );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP phase 0 BEGIN" );
     /*----------------------------------------------------------------*/
     /*      PHASE-0: LOAD GLOBAL CSR TEMPLATE                         */
     /*----------------------------------------------------------------*/
@@ -122,7 +122,7 @@ match / {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 0 Script failed." );
         var $die = ztp_script:terminate();
     } else {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 0 COMPLITED SUCCESSFULLY" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP Phase 0 completed SUCCESSFULLY" );
     }
     var $die = ztp_script:terminate();
 }
@@ -171,7 +171,7 @@ function ztp_script:load_config($config_url, $action = "merge") {
             expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to load config " _ $config_url );
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to load config " _ $config_url );
         } else {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": CONFIG LOAD SUCCESS" );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration was loaded" );
             var $commit = <commit-configuration> {
                 <full>;
                 <synchronize>;
