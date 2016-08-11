@@ -147,7 +147,7 @@ match / {
         var $ztp_callhome_config = $ztp_config_src _ "/" _ $serial_no _ ".conf";
         /* Load configuration file and merge to existed configuration */     
         if (not (ztp_script:load_config($ztp_callhome_config))) {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: failed to load box specific configuration. File was not found or bad configuration.");			
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: failed to load box specific configuration. File was not found or bad configuration.");          
             var $rollback_options := {
                 <commit-options> {
                     <full>;
@@ -394,9 +394,9 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
         /* getting variables from apply-macro */
         var $got_grp = jcs:execute( $jnx, $get_grp );
         for-each ($got_grp/groups[name=$group_name]/apply-macro[name=$macro_name]/data/name) {
-			if (../name == $ZTP_METHOD ) {
-				set $ztd_method = ../value;
-			}
+            if (../name == $ZTP_METHOD ) {
+                set $ztd_method = ../value;
+            }
         }
     }
     result $ztd_method;
@@ -406,12 +406,12 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
 /* nRollback version                                                  */
 /* ------------------------------------------------------------------ */
 function ztp_script:rollback_cfg($cfg_version = 0) {
-	var $rollback_options := {
-		<commit-options> {
-			<full>;
-		}
-	}
-	var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }              
+    var $rollback_options := {
+        <commit-options> {
+            <full>;
+        }
+    }
+    var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }              
 }
 /* ------------------------------------------------------------------ */
 /* Function upgrade_code() checks the currently running Junos version */
@@ -445,37 +445,37 @@ var $get = <get-configuration> {
         expr jcs:progress($JNPR_ZTP_SCRIPT _ ": upgrade required");
         var $image_file = $got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CODE_MACRO_NAME]/data[name=$ZTP_IMAGE]/value;
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Processing " _ ../name );
-		/* Check s/w upgrade flag in basic template. If flag set to inactive skip upgrade procedure */
-		mvar $ztd_inactive = "active"; 
+        /* Check s/w upgrade flag in basic template. If flag set to inactive skip upgrade procedure */
+        mvar $ztd_inactive = "active"; 
         for-each ($got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CODE_MACRO_NAME]/data/name) {           
             if (../name == $ZTP_INACTIVE_FLAG ) {
                 set $ztd_inactive = ../value;
             }
         }
-		if ( $ztd_inactive == "inactive" ) {
+        if ( $ztd_inactive == "inactive" ) {
             expr jcs:syslog( $SYSLOG, $APPNAME _ ": Skip software upgrade due to Upgrade flag in basic template set to inactive" );
             expr jcs:progress($JNPR_ZTP_SCRIPT _ ": Skip software upgrade due to Upgrade flag in basic template set to inactive" );
-		} else {
-			/* request system software add ... */
-		   expr jcs:syslog( $SYSLOG, $APPNAME _ ": installing image" );
-		   var $do_install := <request-package-add> {
-								 <no-validate>;
-								 <force>;
-								 <reboot>;
-								 <package-name> ../name ;
-			}
-			var $install_results = jcs:execute( $jnx, $do_install );
-			for-each( $install_results/../output ) {
-				expr jcs:syslog( $SYSLOG, $APPNAME _ ": Install Error: ", output );
-				expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Install error: " _ output );
-			}
-			if ($install_results/../package-result == 0) {
-				/* successfully installed package -- terminate script and wait for reboot */
-				expr jcs:syslog( $SYSLOG, $APPNAME _ ": software installed" );
-				expr jcs:progress($JNPR_ZTP_SCRIPT _ ": software installed" );
-				var $die = ztp_script:terminate();
-			}
-		}
+        } else {
+            /* request system software add ... */
+           expr jcs:syslog( $SYSLOG, $APPNAME _ ": installing image" );
+           var $do_install := <request-package-add> {
+                                 <no-validate>;
+                                 <force>;
+                                 <reboot>;
+                                 <package-name> ../name ;
+            }
+            var $install_results = jcs:execute( $jnx, $do_install );
+            for-each( $install_results/../output ) {
+                expr jcs:syslog( $SYSLOG, $APPNAME _ ": Install Error: ", output );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Install error: " _ output );
+            }
+            if ($install_results/../package-result == 0) {
+                /* successfully installed package -- terminate script and wait for reboot */
+                expr jcs:syslog( $SYSLOG, $APPNAME _ ": software installed" );
+                expr jcs:progress($JNPR_ZTP_SCRIPT _ ": software installed" );
+                var $die = ztp_script:terminate();
+            }
+        }
     } /* else */
 } /* end function */
 /* ------------------------------------------------------------------ */
