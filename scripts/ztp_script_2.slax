@@ -84,8 +84,79 @@ match / {
     /*     VERIFY WHAT MODEL IS USED - PULL or PUSH                    */
     /*-----------------------------------------------------------------*/
     var $ztp_method = ztp_script:ztp_get_method($ZTP_GROUP_SCENARIOS, $ZTP_SCENARIO);
-    if ( $ztp_method == "pull" ) {
-        /* Proceed with pull model work flow */
+    if ( $ztp_method == "push" ) {
+        /* Proceed with PUSH model work flow */
+         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Push model is in use." );
+        /* Check if configuration for the next ZTP STAGE exists */
+        if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_CALLHOME, $ZTP_CALLHOME_MACRO_NAME) ) ) {
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": No configuration for the next ZTP phase exists. Stop at this point" );
+        var $die = ztp_script:terminate();
+        }
+        var $get = <get-configuration> {
+             <configuration> {
+                <groups> {
+                   <name> $ZTP_GROUP_CALLHOME;
+                }
+            }
+        }
+        var $got = jcs:execute( $jnx, $get );
+        /*-----------------------------------------------------------------*/
+        /*  Deactivate PHASE-2 Configuration group                         */
+        /*     Note:   Next PHASE of ZTP process will be enabled after     */
+        /*             Space NMS completes S/W upgrade and populates node  */
+        /*             into NMS in its database                            */
+        /*-----------------------------------------------------------------*/
+        var $options_s2 := {
+            <commit-options> {
+                <log> "Disables ZTP Phase 2 on completion"; 
+            }
+        }
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Next ZTP phase will be enabled by Space after completion of the call home phase" );
+        var $change_s2 = {
+            <configuration> {
+                <apply-groups delete = "delete"> $ZTP_GROUP_STAGE_2;
+            }
+        }
+        /* Loading configuration */ 
+        var $results_step_3 := { call jcs:load-configuration( $action="merge", $commit-options=$options_s2, $configuration=$change_s2, $connection = $jnx ); }
+        if ($results_step_3//xnm:warning) {
+            for-each ($results_step_3//xnm:warning) {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit warning: " _ message );
+            }
+        }
+        if ($results_step_3//xnm:error) {
+            for-each ($results_step_3//xnm:error) {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: apply-group commit error: " _ message );
+            }
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Script failed." );
+            var $die = ztp_script:terminate();
+        }
+        /* get location of the configlet file */
+        var $ztp_config_src = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_CONFIG]/value;
+        var $ztp_configlet = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_SPACE_CONFIGLET]/value;
+        /* Download configlet file */
+        var $ztp_callhome_config = $ztp_config_src _ "/" _ $ztp_configlet;
+        /*-----------------------------------------------------------------*/
+        /*  LOAD CONFIGURATION FROM CONFIGLET                              */
+        /*-----------------------------------------------------------------*/
+        if (not (ztp_script:load_config($ztp_callhome_config))) {
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Failed to load Space configlet.");
+            var $rollback_options := {
+                <commit-options> {
+                    <full>;
+                }
+            }
+            var $nRollback = 1;
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script rollbacks and retries call home ZTP phase.");
+            var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $nRollback, $connection = $jnx ); }  
+            var $die = ztp_script:terminate();  
+        }
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": Phase 2 completed successfully" );
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": Now calling home to continue ZTP process" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Phase 2 completed successfully" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Now calling home to continue ZTP process." );
+    }
+    else { /*      Proceed with ZTD PULL mode work flow         */
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Pull model is in use." );
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Going to proceed with Junos S/W upgrade" );
         /*----------------------------------------------------------------*/
@@ -162,77 +233,6 @@ match / {
         }
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": ZTD Phase 2 completed successfully" );
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Phase 2 completed successfully" );
-    }
-    else { /*      Proceed with ZTD PUSH mode work flow         */
-         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Push model is in use." );
-        /* Check if configuration for the next ZTP STAGE exists */
-        if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_CALLHOME, $ZTP_CALLHOME_MACRO_NAME) ) ) {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": No configuration for the next ZTP phase exists. Stop at this point" );
-        var $die = ztp_script:terminate();
-        }
-        var $get = <get-configuration> {
-             <configuration> {
-                <groups> {
-                   <name> $ZTP_GROUP_CALLHOME;
-                }
-            }
-        }
-        var $got = jcs:execute( $jnx, $get );
-        /*-----------------------------------------------------------------*/
-        /*  Deactivate PHASE-2 Configuration group                         */
-        /*     Note:   Next PHASE of ZTP process will be enabled after     */
-        /*             Space NMS completes S/W upgrade and populates node  */
-        /*             into NMS in its database                            */
-        /*-----------------------------------------------------------------*/
-        var $options_s2 := {
-            <commit-options> {
-                <log> "Disables ZTP Phase 2 on completion"; 
-            }
-        }
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Next ZTP phase will be enabled by Space after completion of the call home phase" );
-        var $change_s2 = {
-            <configuration> {
-                <apply-groups delete = "delete"> $ZTP_GROUP_STAGE_2;
-            }
-        }
-        /* Loading configuration */ 
-        var $results_step_3 := { call jcs:load-configuration( $action="merge", $commit-options=$options_s2, $configuration=$change_s2, $connection = $jnx ); }
-        if ($results_step_3//xnm:warning) {
-            for-each ($results_step_3//xnm:warning) {
-                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit warning: " _ message );
-            }
-        }
-        if ($results_step_3//xnm:error) {
-            for-each ($results_step_3//xnm:error) {
-                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: apply-group commit error: " _ message );
-            }
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Script failed." );
-            var $die = ztp_script:terminate();
-        }
-        /* get location of the configlet file */
-        var $ztp_config_src = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_CONFIG]/value;
-        var $ztp_configlet = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_SPACE_CONFIGLET]/value;
-        /* Download configlet file */
-        var $ztp_callhome_config = $ztp_config_src _ "/" _ $ztp_configlet;
-        /*-----------------------------------------------------------------*/
-        /*  LOAD CONFIGURATION FROM CONFIGLET                              */
-        /*-----------------------------------------------------------------*/
-        if (not (ztp_script:load_config($ztp_callhome_config))) {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Failed to load Space configlet.");
-            var $rollback_options := {
-                <commit-options> {
-                    <full>;
-                }
-            }
-            var $nRollback = 1;
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script rollbacks and retries call home ZTP phase.");
-            var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $nRollback, $connection = $jnx ); }  
-            var $die = ztp_script:terminate();  
-        }
-        expr jcs:syslog( $SYSLOG, $APPNAME _ ": Phase 2 completed successfully" );
-        expr jcs:syslog( $SYSLOG, $APPNAME _ ": Now calling home to continue ZTP process" );
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Phase 2 completed successfully" );
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Now calling home to continue ZTP process." );
     }
 /*  var $delete_file = ztp_script:file-delete($filename); */
     var $die = ztp_script:terminate();  
