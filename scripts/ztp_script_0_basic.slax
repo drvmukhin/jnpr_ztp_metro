@@ -47,19 +47,19 @@ var $jnx = jcs:open();
 match / {
     if( not( $jnx )) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to connect to Junos API");
-        expr jcs:progress( "ERROR: unable to connect to Junos API");
-        expr jcs:output( $APPNAME _ ":ERROR: unable to connect to Junos API");
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to connect to Junos API");
+        expr jcs:output( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to connect to Junos API");
         terminate;
     }
     var $running = ztp_script:only_once();
     if( $running ) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": process already running, backing off" );
-        expr jcs:progress( "process already running, backing off" );
-        expr jcs:output( $APPNAME _ ": process already running, backing off" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
+        expr jcs:output( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
         terminate;
     }
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": SCRIPT-BEGIN" );
-    expr jcs:progress( "SCRIPT-BEGIN" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BEGIN" );
     /*----------------------------------------------------------------*/
     /*      PHASE-0: LOAD GLOBAL CSR TEMPLATE                         */
     /*----------------------------------------------------------------*/
@@ -83,10 +83,10 @@ match / {
     /*  LOAD NEW ZTP PARAMETERS                              */
     /*-------------------------------------------------------*/
     if (not (ztp_script:load_config($ztp_config_file))) {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": SCRIPT FAILED TO UPDATE ZTP CONFIG. CONFIG FILE NOT FOUND OR BAD CONFIGURATION");
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Global configuration template was not loaded. File not found or bad configuration");
         var $die = ztp_script:terminate();
     } else {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP CONFIG SUCCESSFULLY UPDATED" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP Global configuration template loaded" );
     }
     /*----------------------------------------------------------------*/
     /*  Deactivate configuration group for PHASE-0                    */
@@ -119,7 +119,7 @@ match / {
         for-each ($results_stage_0//xnm:error) {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit error: " _ message );
         }
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHACE 0 Script failed." );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 0 Script failed." );
         var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 0 COMPLITED SUCCESSFULLY" );
@@ -149,29 +149,29 @@ function ztp_script:load_config($config_url, $action = "merge") {
             expr "merge";
         }
     }
-    expr jcs:progress( "Config file: " _ $config_url _ " will be loaded and " _ $phrase  );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Config file: " _ $config_url _ " will be loaded and " _ $phrase  );
     /* lock the config */
     var $lock = <lock-configuration>;
     var $did_lock = jcs:execute( $jnx, $lock );
     if ( $did_lock//self::xnm:error ) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to lock config" );
-        expr jcs:progress( "ERROR: unable to lock config" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to lock config" );
         set $load_config = false();
     } else {
-        expr jcs:progress( "Got config lock" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Got config lock" );
     }
     if ($load_config) {       
         set $load_config = false();
-        expr jcs:progress( "Processing config url " _ $config_url );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Processing config url " _ $config_url );
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": Processing config url " _ $config_url );
         /* load in new config */
         var $do_load = <load-configuration action="merge" url=$config_url format="text">;
         var $did_load = jcs:execute( $jnx, $do_load );
         if( not( $did_load/load-success )) {
             expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to load config " _ $config_url );
-            expr jcs:progress( "ERROR: unable to load config " _ $config_url );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to load config " _ $config_url );
         } else {
-            expr jcs:progress( "CONFIG LOAD SUCCESS" );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": CONFIG LOAD SUCCESS" );
             var $commit = <commit-configuration> {
                 <full>;
                 <synchronize>;
@@ -180,19 +180,18 @@ function ztp_script:load_config($config_url, $action = "merge") {
             }
             var $did_commit = jcs:execute( $jnx, $commit );
             if ( $did_commit//self::xnm:error ) {
-                expr jcs:progress( "COMMIT FAILED" );
-                expr jcs:syslog( $SYSLOG, $APPNAME _ ": COMMIT FAILED" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Commit failed" );
+                expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: Commit failed" );
             } else {
-                expr jcs:progress( "COMMIT SUCCESS" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration was committed" );
                 /*
                 * reboot here
                 * var $reboot := jcs:execute( $jnx, 'request-reboot' );
                 */
                 var $unlock = <unlock-configuration>;
                 var $did_unlock = jcs:execute( $jnx, $unlock );
-                expr jcs:progress( "release config lock" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": release config lock" );
                 set $load_config = true();
-                /*var $die = ztp_script:terminate();*/
             }
         }
     } /* end of foreach config_url */
@@ -200,7 +199,7 @@ function ztp_script:load_config($config_url, $action = "merge") {
         /* if we make it here, we failed to load the config */
         var $unlock = <unlock-configuration>;
         var $did_unlock = jcs:execute( $jnx, $unlock );
-        expr jcs:progress( "release config lock" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": release config lock" );
     }
     result $load_config;    
 }

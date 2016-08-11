@@ -64,33 +64,65 @@ var $jnx = jcs:open();
 match / {
     if( not( $jnx )) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to connect to Junos API");
-        expr jcs:progress( "ERROR: unable to connect to Junos API");
-        expr jcs:output( $APPNAME _ ":ERROR: unable to connect to Junos API");
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to connect to Junos API");
+        expr jcs:output( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to connect to Junos API");
         terminate;
     }
     var $running = ztp_script:only_once();
     if( $running ) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": process already running, backing off" );
-        expr jcs:progress( "process already running, backing off" );
-        expr jcs:output( $APPNAME _ ": process already running, backing off" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
+        expr jcs:output( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
         terminate;
     }
     expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BEGIN" );
-    var $serial_no = ztp_script:get_serial_number();
-    var $platform = ztp_script:get_platform();
+	/*--------------------------------------------------------------*/
+    /*  DEACTIVATE PHASE-1 Configuration group                      */
+    /*--------------------------------------------------------------*/
+    var $options_0 := {
+        <commit-options> {
+            <log> "Enabling next ZTP Phase"; 
+        }
+    }
+    var $change_0 = {
+        <configuration> {
+            <apply-groups delete="delete"> $ZTP_GROUP_STAGE_1;
+        }
+    }
+    /* Load new configuration */    
+    var $results_stage_0 := { call jcs:load-configuration( $action="merge", $commit-options=$options_0, $configuration=$change_0, $connection = $jnx ); }
+    if ($results_stage_0//xnm:warning) {
+        for-each ($results_stage_0//xnm:warning) {
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit warning: " _ message );
+        }
+    }
+    if ($results_stage_0//xnm:error) {
+        for-each ($results_stage_0//xnm:error) {
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit error: " _ message );
+        }
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Commit failed." );
+        var $die = ztp_script:terminate();
+    } else {
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration group for ZTP Phase 2 was disabled" );
+    }
+	mvar $nRollback = 1;
     /*---------------------------------------------------------------------------------------*/
     /* Verify that configuration group and apply-macro with platform specific ZTP parameters */
     /* exist in the global configuration template                                            */
     /*---------------------------------------------------------------------------------------*/
+    var $serial_no = ztp_script:get_serial_number();
+    var $platform = ztp_script:get_platform();
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Looking for " _ $platform _ " specific parameters." );
     expr jcs:syslog( $SYSLOG, $APPNAME _ "Looking for " _ $platform _ " specific parameters." );
     if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_PLATFORM, $ZTP_MACRO_NAME_PREFIX _ $platform) ) ) {
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Failed to find platform specific ZTP parameters in global template." );
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Make sure that apply-macro " _ $ZTP_MACRO_NAME_PREFIX _ $platform _ " exists under " _ $ZTP_GROUP_PLATFORM _ " group in global template." );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Exiting ztp_script now." );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
+	var $ztd_rollback = ztp_script:rollback_cfg($nRollback);
     var $die = ztp_script:terminate();
     }
+	
     /* Creating static configuration and enabling management access to the node */
     /* 
         0. Read parameters assigned dynamically via DHCP:
@@ -115,12 +147,15 @@ match / {
     }
     if ($results_step_1//xnm:error) {
         for-each ($results_step_1//xnm:error) {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": set_dhcp_to_static() commit error: " _ message );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": dhcp_to_static() commit error: " _ message );
         }
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ " failed." );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
+	    var $ztd_rollback = ztp_script:rollback_cfg($nRollback);
         var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Platform specific configuration committed successfully." );
+		set $nRollback = $nRollback + 1;
     }
     /*-----------------------------------------*/
     /* Looking for box specific ZTP parameters */
@@ -142,51 +177,60 @@ match / {
             for-each ($results_step_1//xnm:error) {
                 expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": set_box_specific_config() commit error: " _ message );
             }
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script failed." );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Commit failed." );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
+	        var $ztd_rollback = ztp_script:rollback_cfg($nRollback);			
             var $die = ztp_script:terminate();
         } else {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuratIon committed successfully." );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuration committed successfully." );
+			set $nRollback = $nRollback + 1;
         }
     }
-    if ( ztp_script:ztp_grp_exists($ZTP_GROUP_BOX) ) {
-        /* Deleting configuration group box specific settings */
-        var $ztp_rm_grp_2 = ztp_script:remove_old_cfg($ZTP_GROUP_BOX);
-    }
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": COMPLITED SUCCESSFULLY" );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": COMPLITED SUCCESSFULLY" );
     /*--------------------------------------------------------------*/
-    /*  DEACTIVATE PHASE-1 Configuration group                      */
-    /*  ACTIVATE   PHASE-2 Configuration group                      */  
+    /*  DELETE Box specific configuration if exists                 */
+    /*  ACTIVATE   PHASE 2 Configuration group if exists            */  
     /*--------------------------------------------------------------*/
-    var $options := {
+    var $options_1 := {
         <commit-options> {
             <log> "Enabling next ZTP Phase"; 
         }
     }
-    var $change = {
+    var $change_1 = {
         <configuration> {
-            <apply-groups delete="delete"> $ZTP_GROUP_STAGE_1;
+            if ( ztp_script:ztp_grp_exists($ZTP_GROUP_BOX) ) {
+			    <groups delete="delete"> {
+                    <name> $ZTP_GROUP_BOX;
+					expr jcs:syslog( $SYSLOG, $APPNAME _ ": Deleting configuration group " _ $ZTP_GROUP_BOX );
+                    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Deleting configuration group " _ $ZTP_GROUP_BOX );
+                }
+			}
             if ( ztp_script:ztp_grp_exists($ZTP_GROUP_STAGE_2) )  {
                 <apply-groups> $ZTP_GROUP_STAGE_2;
-            }
+            } else {
+				expr jcs:syslog( $SYSLOG, $APPNAME _ ": WARNING: No configuration group for Phase 2 found in global template. STOP at this point.");
+				expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": WARNING: No configuration group for Phase 2 found in global template. STOP at this point.");
+			} 
         }
     }
     /* Load new configuration */    
-    var $results_stage_0 := { call jcs:load-configuration( $action="merge", $commit-options=$options, $configuration=$change, $connection = $jnx ); }
-    if ($results_stage_0//xnm:warning) {
-        for-each ($results_stage_0//xnm:warning) {
+    var $results_stage_1 := { call jcs:load-configuration( $action="merge", $commit-options=$options_1, $configuration=$change_1, $connection = $jnx ); }
+    if ($results_stage_1//xnm:warning) {
+        for-each ($results_stage_1//xnm:warning) {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit warning: " _ message );
         }
     }
-    if ($results_stage_0//xnm:error) {
-        for-each ($results_stage_0//xnm:error) {
+    if ($results_stage_1//xnm:error) {
+        for-each ($results_stage_1//xnm:error) {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit error: " _ message );
         }
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": failed." );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Commit failed. " );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
+	    var $ztd_rollback = ztp_script:rollback_cfg($nRollback);			
         var $die = ztp_script:terminate();
     } else {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE-2 ENABLED SUCCESSFULLY" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration was committed" );
     }
+	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP Phase 1 COMPLETED" );
     var $die = ztp_script:terminate();
 }
 /* -------------------------------------------------------------------------------- */
@@ -281,7 +325,7 @@ function ztp_script:remove_old_cfg($group_name) {
     }
     var $options := {
          <commit-options> {
-            <log> "ztp script prepare to commit"; 
+            <log> "deleting configuration group " _ $group_name;; 
         }
     }
     var $change = {
@@ -683,6 +727,18 @@ function ztp_script:set_box_specific_config($platform, $serial_no) {
     var $results := { call jcs:load-configuration( $action="merge", $commit-options=$options, $configuration=$change, $connection = $jnx ); }
     result $results;
 } /* End of the set_box_specific_config function */
+/* ------------------------------------------------------------------ */
+/* Function rolback_cfg($nRollback) rollback configuration to         */
+/* nRollback version                                                  */
+/* ------------------------------------------------------------------ */
+function ztp_script:rollback_cfg( $cfg_version=0 ) {
+	var $rollback_options := {
+		<commit-options> {
+			<full>;
+		}	
+	}
+	var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }              
+}
 /* ------------------------------------------------------------------ */
 /* Helper routines
 /* ------------------------------------------------------------------ */

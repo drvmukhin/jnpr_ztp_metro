@@ -51,6 +51,9 @@ var $ZTP_OAM_VLAN = "OAM_VLAN";
 var $ZTP_LOOPBACK = "Lo0";
 var $ZTP_CONFIG = "CONFIG";
 var $ZTP_SPACE_CONFIGLET = "SPACE-CONFIGLET";
+var $ZTP_VERSION = "VERSION";
+var $ZTP_IMAGE = "IMAGE";
+var $ZTP_INACTIVE_FLAG = "INACTIVE";
 var $ZTP_GROUP_STAGE_1 = "GR-ZTP-STAGE-1";
 var $ZTP_GROUP_STAGE_2 = "GR-ZTP-STAGE-2";
 var $ZTP_GROUP_STAGE_3 = "GR-ZTP-STAGE-3";
@@ -65,14 +68,14 @@ match / {
     if( not( $jnx )) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to connect to Junos API");
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to connect to Junos API");
-        expr jcs:output( $APPNAME _ ":ERROR: unable to connect to Junos API");
+        expr jcs:output( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to connect to Junos API");
         terminate;
     }
     var $running = ztp_script:only_once();
     if( $running ) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": process already running, backing off" );
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
-        expr jcs:output( $APPNAME _ ": process already running, backing off" );
+        expr jcs:output( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
         terminate;
     }
     expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
@@ -81,6 +84,7 @@ match / {
     /*     VERIFY WHAT MODEL IS USED - PULL or PUSH                    */
     /*-----------------------------------------------------------------*/
     var $ztp_method = ztp_script:ztp_get_method($ZTP_GROUP_SCENARIOS, $ZTP_SCENARIO);
+	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Method returned as " _ $ztp_method );
     if ( $ztp_method == "pull" ) {
         /* Proceed with pull model work flow */
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Pull model is in use." );
@@ -93,6 +97,35 @@ match / {
         } else {
             var $code_upgrade = ztp_script:upgrade_code();
         }
+        /*-----------------------------------------------------------------*/
+        /*  DEACTIVATE PHASE-2 Configuration group                         */
+        /*-----------------------------------------------------------------*/
+        var $options_s2 := {
+            <commit-options> {
+                <log> "Disables configuration group for phase 2 on completion"; 
+            }
+        }
+        var $change_s2 = {
+            <configuration> {
+                <apply-groups delete = "delete"> $ZTP_GROUP_STAGE_2;
+            }
+        }
+        /* Loading configuration */ 
+        var $results_step_3 := { call jcs:load-configuration( $action="merge", $commit-options=$options_s2, $configuration=$change_s2, $connection = $jnx ); }
+        if ($results_step_3//xnm:warning) {
+            for-each ($results_step_3//xnm:warning) {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit warning: " _ message );
+            }
+        }
+        if ($results_step_3//xnm:error) {
+            for-each ($results_step_3//xnm:error) {
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit error: " _ message );
+            }
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script failed." );
+            var $die = ztp_script:terminate();
+        } else {
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 2 Configuration group was deactivated" );
+        }       
         /*----------------------------------------------------------------*/
         /*      GET LOCATION OF THE BOX SPECIFIC CONFIGURATION FILE       */
         /*----------------------------------------------------------------*/
@@ -115,44 +148,7 @@ match / {
         var $ztp_callhome_config = $ztp_config_src _ "/" _ $serial_no _ ".conf";
         /* Load configuration file and merge to existed configuration */     
         if (not (ztp_script:load_config($ztp_callhome_config))) {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": FAILED TO LOAD BOX SPECIFIC CONFIGURATION. FILE NOT FOUND OR BAD CONFIGURATION");
-            var $die = ztp_script:terminate();  
-        } else {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BOX SPECIFIC CONFIGURATION LOADED" );
-        }
-        expr jcs:syslog( $SYSLOG, $APPNAME _ ": ZTD Phase 2 completed successfully" );
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Phase 2 completed successfully" );
-        /*-----------------------------------------------------------------*/
-        /*  DEACTIVATE PHASE-2 Configuration group                         */
-        /*  ACTIVATE   PHASE-3 Configuration group if exists.              */  
-        /*-----------------------------------------------------------------*/
-        var $options_s2 := {
-            <commit-options> {
-                <log> "Disables configuration group for phase 2 on completion"; 
-            }
-        }
-        var $change_s2 = {
-            <configuration> {
-                <apply-groups delete = "delete"> $ZTP_GROUP_STAGE_2;
-                if ( ztp_script:ztp_grp_exists($ZTP_GROUP_STAGE_3) ) {
-                    <apply-groups> $ZTP_GROUP_STAGE_3;
-                } else {
-                    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": NO CONFIGURATION GROUP FOR STAGE 3 FOUND" );
-                }
-            }
-        }
-        /* Loading configuration */ 
-        var $results_step_3 := { call jcs:load-configuration( $action="merge", $commit-options=$options_s2, $configuration=$change_s2, $connection = $jnx ); }
-        if ($results_step_3//xnm:warning) {
-            for-each ($results_step_3//xnm:warning) {
-                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit warning: " _ message );
-            }
-        }
-        if ($results_step_3//xnm:error) {
-            for-each ($results_step_3//xnm:error) {
-                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit error: " _ message );
-            }
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script failed." );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: failed to load box specific configuration. File was not found or bad configuration.");			
             var $rollback_options := {
                 <commit-options> {
                     <full>;
@@ -161,10 +157,12 @@ match / {
             var $nRollback = 1;
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollbacks and retries ZTP phase 2.");
             var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $nRollback, $connection = $jnx ); }              
-            var $die = ztp_script:terminate();
+            var $die = ztp_script:terminate();  
         } else {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 2 COMPLITED SUCCESSFULLY" );
-        }       
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuration was loaded" );
+        }
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": ZTD Phase 2 completed successfully" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Phase 2 completed successfully" );
     }
     else { /*      Proceed with ZTD PUSH mode work flow         */
          expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Push model is in use." );
@@ -215,8 +213,7 @@ match / {
         /* get location of the configlet file */
         var $ztp_config_src = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_CONFIG]/value;
         var $ztp_configlet = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_SPACE_CONFIGLET]/value;
-        /* Download configlet file */     
-        var $serial_no = ztp_script:get_serial_number();
+        /* Download configlet file */
         var $ztp_callhome_config = $ztp_config_src _ "/" _ $ztp_configlet;
         /*-----------------------------------------------------------------*/
         /*  LOAD CONFIGURATION FROM CONFIGLET                              */
@@ -232,8 +229,6 @@ match / {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollbacks and retries call home ZTP phase.");
             var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $nRollback, $connection = $jnx ); }  
             var $die = ztp_script:terminate();  
-        } else {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": CALL HOME CONFIGURATION LOADED" );
         }
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": Phase 2 completed successfully" );
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": Now calling home to continue ZTP process" );
@@ -266,29 +261,29 @@ function ztp_script:load_config($config_url, $action = "merge") {
             expr "merge";
         }
     }
-    expr jcs:progress( "Config file: " _ $config_url _ " will be loaded and " _ $phrase  );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Config file: " _ $config_url _ " will be loaded and " _ $phrase  );
     /* lock the config */
     var $lock = <lock-configuration>;
     var $did_lock = jcs:execute( $jnx, $lock );
     if ( $did_lock//self::xnm:error ) {
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to lock config" );
-        expr jcs:progress( "ERROR: unable to lock config" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to lock config" );
         set $load_config = false();
     } else {
-        expr jcs:progress( "Got config lock" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Got config lock" );
     }
     if ($load_config) {       
         set $load_config = false();
-        expr jcs:progress( "Processing config url " _ $config_url );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Processing config url " _ $config_url );
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": Processing config url " _ $config_url );
         /* load in new config */
         var $do_load = <load-configuration action="merge" url=$config_url format="text">;
         var $did_load = jcs:execute( $jnx, $do_load );
         if( not( $did_load/load-success )) {
             expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to load config " _ $config_url );
-            expr jcs:progress( "ERROR: unable to load config " _ $config_url );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to load config " _ $config_url );
         } else {
-            expr jcs:progress( "CONFIG LOAD SUCCESS" );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": CONFIG LOAD SUCCESS" );
             var $commit = <commit-configuration> {
                 <full>;
                 <synchronize>;
@@ -297,13 +292,13 @@ function ztp_script:load_config($config_url, $action = "merge") {
             }
             var $did_commit = jcs:execute( $jnx, $commit );
             if ( $did_commit//self::xnm:error ) {
-                expr jcs:progress( "COMMIT FAILED" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": COMMIT FAILED" );
                 expr jcs:syslog( $SYSLOG, $APPNAME _ ": COMMIT FAILED" );
             } else {
-                expr jcs:progress( "COMMIT SUCCESS" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": COMMIT SUCCESS" );
                 var $unlock = <unlock-configuration>;
                 var $did_unlock = jcs:execute( $jnx, $unlock );
-                expr jcs:progress( "release config lock" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": release config lock" );
                 set $load_config = true();
                 /*var $die = ztp_script:terminate();*/
             }
@@ -313,7 +308,7 @@ function ztp_script:load_config($config_url, $action = "merge") {
         /* if we make it here, we failed to load the config */
         var $unlock = <unlock-configuration>;
         var $did_unlock = jcs:execute( $jnx, $unlock );
-        expr jcs:progress( "release config lock" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": release config lock" );
     }
     result $load_config;    
 }
@@ -400,13 +395,15 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
         /* getting variables from apply-macro */
         var $got_grp = jcs:execute( $jnx, $get_grp );
         for-each ($got_grp/groups[name=$group_name]/apply-macro[name=$macro_name]/data/name) {
-            set $ztd_method = {
+            
                 if (../name == $ZTP_METHOD ) {
-                    expr ../value;
+                    set $ztd_method = ../value;
+					expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Parameter name = " _ ../name _ " value = " _ ../value);
                 }
-            }
+            
         }
     }
+	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD method was set to " _ $ztd_method );
     result $ztd_method;
 }  
 /* ------------------------------------------------------------------ */
@@ -430,37 +427,48 @@ var $get = <get-configuration> {
     var $running_version = $got/version;
     var $production_version = $got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CODE_MACRO_NAME]/data[name=$ZTP_VERSION]/value;
     expr jcs:syslog( $SYSLOG, $APPNAME _ ": running_version = " _ $running_version);
-    expr jcs:progress( "running_version = " _ $running_version);
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": running_version = " _ $running_version);
     expr jcs:syslog( $SYSLOG, $APPNAME _ ": production_version = " _ $production_version);
-    expr jcs:progress( "production_version = " _ $production_version);
+    expr jcs:progress($JNPR_ZTP_SCRIPT _ ": production_version = " _ $production_version);
     if ($running_version == $production_version) {
-        expr jcs:progress( "Code is up to date, no upgrade required");
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Code is up to date, no upgrade required");
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": Code is up to date, no upgrade required");
         result false();
     } else {
-        expr jcs:progress( "upgrade required");
-        expr jcs:trace("upgrade required");
+        expr jcs:progress($JNPR_ZTP_SCRIPT _ ": upgrade required");
         var $image_file = $got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CODE_MACRO_NAME]/data[name=$ZTP_IMAGE]/value;
-        expr jcs:progress( "Processing " _ ../name );
-        /* request system software add ... */
-       expr jcs:syslog( $SYSLOG, $APPNAME _ ": installing image" );
-       var $do_install := <request-package-add> {
-                             <no-validate>;
-                             <force>;
-                             <reboot>;
-                             <package-name> ../name ;
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Processing " _ ../name );
+		/* Check s/w upgrade flag in basic template. If flag set to inactive skip upgrade procedure */
+		mvar $ztd_inactive = "active"; 
+        for-each ($got/groups[name=$ZTP_GROUP_NAME]/apply-macro[name=$ZTP_CODE_MACRO_NAME]/data/name) {           
+            if (../name == $ZTP_INACTIVE_FLAG ) {
+                set $ztd_inactive = ../value;
+            }
         }
-        var $install_results = jcs:execute( $jnx, $do_install );
-        for-each( $install_results/../output ) {
-             expr jcs:syslog( $SYSLOG, $APPNAME _ ": Install Error: ", output );
-             expr jcs:progress( "Install error: " _ output );
-        }
-        if ($install_results/../package-result == 0) {
-            /* successfully installed package -- terminate script and wait for reboot */
-            expr jcs:syslog( $SYSLOG, $APPNAME _ ": software installed" );
-            expr jcs:progress( "software installed" );
-            var $die = ztp_script:terminate();
-        }
+		if ( $ztd_inactive == "inactive" ) {
+            expr jcs:syslog( $SYSLOG, $APPNAME _ ": Skip software upgrade due to Upgrade flag in basic template set to inactive" );
+            expr jcs:progress($JNPR_ZTP_SCRIPT _ ": Skip software upgrade due to Upgrade flag in basic template set to inactive" );
+		} else {
+			/* request system software add ... */
+		   expr jcs:syslog( $SYSLOG, $APPNAME _ ": installing image" );
+		   var $do_install := <request-package-add> {
+								 <no-validate>;
+								 <force>;
+								 <reboot>;
+								 <package-name> ../name ;
+			}
+			var $install_results = jcs:execute( $jnx, $do_install );
+			for-each( $install_results/../output ) {
+				expr jcs:syslog( $SYSLOG, $APPNAME _ ": Install Error: ", output );
+				expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Install error: " _ output );
+			}
+			if ($install_results/../package-result == 0) {
+				/* successfully installed package -- terminate script and wait for reboot */
+				expr jcs:syslog( $SYSLOG, $APPNAME _ ": software installed" );
+				expr jcs:progress($JNPR_ZTP_SCRIPT _ ": software installed" );
+				var $die = ztp_script:terminate();
+			}
+		}
     } /* else */
 } /* end function */
 /* ------------------------------------------------------------------ */
