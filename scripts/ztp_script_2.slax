@@ -78,13 +78,12 @@ match / {
         expr jcs:output( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
         terminate;
     }
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BEGIN" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": ZTP Phase 2 BEGIN" );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP Phase 2 BEGIN" );
     /*-----------------------------------------------------------------*/
     /*     VERIFY WHAT MODEL IS USED - PULL or PUSH                    */
     /*-----------------------------------------------------------------*/
     var $ztp_method = ztp_script:ztp_get_method($ZTP_GROUP_SCENARIOS, $ZTP_SCENARIO);
-	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Method returned as " _ $ztp_method );
     if ( $ztp_method == "pull" ) {
         /* Proceed with pull model work flow */
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD Pull model is in use." );
@@ -205,9 +204,9 @@ match / {
         }
         if ($results_step_3//xnm:error) {
             for-each ($results_step_3//xnm:error) {
-                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit error: " _ message );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: apply-group commit error: " _ message );
             }
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script failed." );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Script failed." );
             var $die = ztp_script:terminate();
         }
         /* get location of the configlet file */
@@ -226,7 +225,7 @@ match / {
                 }
             }
             var $nRollback = 1;
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollbacks and retries call home ZTP phase.");
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script rollbacks and retries call home ZTP phase.");
             var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $nRollback, $connection = $jnx ); }  
             var $die = ztp_script:terminate();  
         }
@@ -266,11 +265,11 @@ function ztp_script:load_config($config_url, $action = "merge") {
     var $lock = <lock-configuration>;
     var $did_lock = jcs:execute( $jnx, $lock );
     if ( $did_lock//self::xnm:error ) {
-        expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to lock config" );
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to lock config" );
+        expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to lock configuration" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to lock configuration" );
         set $load_config = false();
     } else {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Got config lock" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration was locked" );
     }
     if ($load_config) {       
         set $load_config = false();
@@ -283,7 +282,7 @@ function ztp_script:load_config($config_url, $action = "merge") {
             expr jcs:syslog( $SYSLOG, $APPNAME _ ": ERROR: unable to load config " _ $config_url );
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: unable to load config " _ $config_url );
         } else {
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": CONFIG LOAD SUCCESS" );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration was loaded" );
             var $commit = <commit-configuration> {
                 <full>;
                 <synchronize>;
@@ -292,10 +291,10 @@ function ztp_script:load_config($config_url, $action = "merge") {
             }
             var $did_commit = jcs:execute( $jnx, $commit );
             if ( $did_commit//self::xnm:error ) {
-                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": COMMIT FAILED" );
-                expr jcs:syslog( $SYSLOG, $APPNAME _ ": COMMIT FAILED" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Commit Failed" );
+                expr jcs:syslog( $SYSLOG, $APPNAME _ ": Commit Failed" );
             } else {
-                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": COMMIT SUCCESS" );
+                expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration was committed" );
                 var $unlock = <unlock-configuration>;
                 var $did_unlock = jcs:execute( $jnx, $unlock );
                 expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": release config lock" );
@@ -403,9 +402,20 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
             
         }
     }
-	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTD method was set to " _ $ztd_method );
     result $ztd_method;
 }  
+/* ------------------------------------------------------------------ */
+/* Function rolback_cfg($nRollback) rollback configuration to         */
+/* nRollback version                                                  */
+/* ------------------------------------------------------------------ */
+function ztp_script:rollback_cfg($cfg_version = 0) {
+	var $rollback_options := {
+		<commit-options> {
+			<full>;
+		}
+	}
+	var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }              
+}
 /* ------------------------------------------------------------------ */
 /* Function upgrade_code() checks the currently running Junos version */
 /* and upgrades the code                                              */

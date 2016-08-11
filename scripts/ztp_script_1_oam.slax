@@ -75,14 +75,15 @@ match / {
         expr jcs:output( $JNPR_ZTP_SCRIPT _ ": process already running, backing off" );
         terminate;
     }
-    expr jcs:syslog( $SYSLOG, $APPNAME _ ": BEGIN" );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": BEGIN" );
+    expr jcs:syslog( $SYSLOG, $APPNAME _ ": ZTP Phase 1 BEGIN" );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP Phase 1 BEGIN" );
 	/*--------------------------------------------------------------*/
     /*  DEACTIVATE PHASE-1 Configuration group                      */
     /*--------------------------------------------------------------*/
-    var $options_0 := {
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Deactivating event-options for ZTP Phase 1 script..." );
+	var $options_0 := {
         <commit-options> {
-            <log> "Enabling next ZTP Phase"; 
+            <log> "Deactivating configuration group for Phase 1"; 
         }
     }
     var $change_0 = {
@@ -104,7 +105,7 @@ match / {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Commit failed." );
         var $die = ztp_script:terminate();
     } else {
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration group for ZTP Phase 2 was disabled" );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration for event-options for ZTP Phase 1 was disabled" );
     }
 	mvar $nRollback = 1;
     /*---------------------------------------------------------------------------------------*/
@@ -224,13 +225,13 @@ match / {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": commit error: " _ message );
         }
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Commit failed. " );
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 1 and exiting ztp_script now." );
 	    var $ztd_rollback = ztp_script:rollback_cfg($nRollback);			
         var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Configuration was committed" );
     }
-	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP Phase 1 COMPLETED" );
+	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP Phase 1 completed successfully" );
     var $die = ztp_script:terminate();
 }
 /* -------------------------------------------------------------------------------- */
