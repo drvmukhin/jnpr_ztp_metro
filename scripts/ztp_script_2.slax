@@ -132,8 +132,18 @@ match / {
             var $die = ztp_script:terminate();
         }
         /* get location of the configlet file */
-        var $ztp_config_src = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_CONFIG]/value;
-        var $ztp_configlet = $got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data[name=$ZTP_SPACE_CONFIGLET]/value;
+        mvar $ztp_config_src = " ";
+        mvar $ztp_configlet = "space_configlet.conf";
+		for-each ($got/groups[name=$ZTP_GROUP_CALLHOME]/apply-macro[name=$ZTP_CALLHOME_MACRO_NAME]/data/name) {
+            if (../name == $ZTP_CONFIG ) {
+                set $ztp_config_src = ../value;
+            }
+            if (../name == $ZTP_SPACE_CONFIGLET ) {
+			    if (( string-length(../value) > 2 ) && (not ( contains(../value, ' ')))) {
+                    set $ztp_configlet = ../value;
+				}
+            }			
+        }
         /* Download configlet file */
         var $ztp_callhome_config = $ztp_config_src _ "/" _ $ztp_configlet;
         /*-----------------------------------------------------------------*/
