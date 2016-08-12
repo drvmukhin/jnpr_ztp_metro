@@ -151,14 +151,9 @@ match / {
         /*-----------------------------------------------------------------*/
         if (not (ztp_script:load_config($ztp_callhome_config))) {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Failed to load Space configlet.");
-            var $rollback_options := {
-                <commit-options> {
-                    <full>;
-                }
-            }
-            var $nRollback = 1;
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script rollbacks and retries call home ZTP phase.");
-            var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $nRollback, $connection = $jnx ); }  
+			var $nRollback = 1;
+			var $ztp_rollback = ztp_script:rollback_cfg( $nRollback, "Rollback configuration to beginning of phase 2" );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script rollbacks to beginning of phase 2 and terminates.");
             var $die = ztp_script:terminate();  
         }
         expr jcs:syslog( $SYSLOG, $APPNAME _ ": Phase 2 completed successfully" );
@@ -201,7 +196,7 @@ match / {
             for-each ($results_step_3//xnm:error) {
                 expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": apply-group commit error: " _ message );
             }
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script failed." );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Script failed." );
             var $die = ztp_script:terminate();
         } else {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ZTP PHASE 2 Configuration group was deactivated" );
@@ -229,14 +224,9 @@ match / {
         /* Load configuration file and merge to existed configuration */     
         if (not (ztp_script:load_config($ztp_callhome_config))) {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: failed to load box specific configuration. File was not found or bad configuration.");          
-            var $rollback_options := {
-                <commit-options> {
-                    <full>;
-                }
-            }
-            var $nRollback = 1;
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollbacks and retries ZTP phase 2.");
-            var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $nRollback, $connection = $jnx ); }              
+			var $nRollback = 1;
+			var $ztp_rollback = ztp_script:rollback_cfg( $nRollback, "Rollback configuration to beginning of phase 2" );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script rollbacks to beginning of phase 2 and terminates.");
             var $die = ztp_script:terminate();  
         } else {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuration was loaded" );
@@ -412,18 +402,6 @@ function ztp_script:ztp_get_method($group_name, $macro_name) {
     result $ztd_method;
 }  
 /* ------------------------------------------------------------------ */
-/* Function rolback_cfg($nRollback) rollback configuration to         */
-/* nRollback version                                                  */
-/* ------------------------------------------------------------------ */
-function ztp_script:rollback_cfg($cfg_version = 0) {
-    var $rollback_options := {
-        <commit-options> {
-            <full>;
-        }
-    }
-    var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }              
-}
-/* ------------------------------------------------------------------ */
 /* Function upgrade_code() checks the currently running Junos version */
 /* and upgrades the code                                              */
 /* ------------------------------------------------------------------ */
@@ -488,6 +466,19 @@ var $get = <get-configuration> {
         }
     } /* else */
 } /* end function */
+/* ------------------------------------------------------------------ */
+/* Function rolback_cfg($nRollback) rollback configuration to         */
+/* nRollback version                                                  */
+/* ------------------------------------------------------------------ */
+function ztp_script:rollback_cfg( $cfg_version=0, $rollback_log="Rollback configuration" ) {
+    var $rollback_options := {
+        <commit-options> {
+            <full>;
+			<log> $rollback_log;
+        }   
+    }
+    var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }	
+}
 /* ------------------------------------------------------------------ */
 /* Helper routines
 /* ------------------------------------------------------------------ */

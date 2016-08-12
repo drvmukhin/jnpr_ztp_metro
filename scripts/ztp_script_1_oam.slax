@@ -115,10 +115,10 @@ match / {
     expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Looking for " _ $platform _ " specific parameters." );
     expr jcs:syslog( $SYSLOG, $APPNAME _ "Looking for " _ $platform _ " specific parameters." );
     if ( not( ztp_script:ztp_grp_exists($ZTP_GROUP_PLATFORM, $ZTP_MACRO_NAME_PREFIX _ $platform) ) ) {
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Failed to find platform specific ZTP parameters in global template." );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Make sure that apply-macro " _ $ZTP_MACRO_NAME_PREFIX _ $platform _ " exists under " _ $ZTP_GROUP_PLATFORM _ " group in global template." );
-    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
-    var $ztd_rollback = ztp_script:rollback_cfg($nRollback);
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Failed to find platform specific ZTP parameters in global template." );
+    expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Note: Make sure that apply-macro " _ $ZTP_MACRO_NAME_PREFIX _ $platform _ " exists under " _ $ZTP_GROUP_PLATFORM _ " group in global template." );
+    var $ztd_rollback = ztp_script:ztp_rollback_phase0();
+	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script terminated." );
     var $die = ztp_script:terminate();
     }
     
@@ -148,10 +148,11 @@ match / {
         for-each ($results_step_1//xnm:error) {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": dhcp_to_static() commit error: " _ message );
         }
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ " failed." );
-        expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
-        var $ztd_rollback = ztp_script:rollback_cfg($nRollback);
-        var $die = ztp_script:terminate();
+        expr jcs:progress( $JNPR_ZTP_SCRIPT _ " ERROR: Commit failed." );
+		expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Note: Verify parametrs in global conviguration template." );		
+		var $ztd_rollback = ztp_script:ztp_rollback_phase0();
+		expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Script terminated." );		
+		var $die = ztp_script:terminate();
     } else {
         expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Platform specific configuration committed successfully." );
         set $nRollback = $nRollback + 1;
@@ -176,10 +177,10 @@ match / {
             for-each ($results_step_1//xnm:error) {
                 expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": set_box_specific_config() commit error: " _ message );
             }
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Commit failed." );
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Rollback to beginning of phase 2 and exiting ztp_script now." );
-            var $ztd_rollback = ztp_script:rollback_cfg($nRollback);            
-            var $die = ztp_script:terminate();
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": ERROR: Failed to commit box specific parameters." );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Skip this step and continue ZTP process." );
+            var $ztd_rollback = ztp_script:rollback_cfg(0);            
+            /* var $die = ztp_script:terminate(); */
         } else {
             expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Box specific configuration committed successfully." );
             set $nRollback = $nRollback + 1;
@@ -361,7 +362,6 @@ function ztp_script:set_dhcp_to_static($platform) {
     }
     /* getting variables from apply-macro */
     var $got = jcs:execute( $jnx, $get );
-/*    var $ztp_oam_vlan = $got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data[name=$ZTP_OAM_VLAN]/value; */
     mvar $ztp_oam_vlan = "2";
     mvar $ztp_host_prefix = "csr";  
     for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
@@ -741,13 +741,34 @@ function ztp_script:set_box_specific_config($platform, $serial_no) {
 /* Function rolback_cfg($nRollback) rollback configuration to         */
 /* nRollback version                                                  */
 /* ------------------------------------------------------------------ */
-function ztp_script:rollback_cfg( $cfg_version=0 ) {
+function ztp_script:rollback_cfg( $cfg_version=0, $rollback_log="Rollback configuration" ) {
     var $rollback_options := {
         <commit-options> {
             <full>;
+			<log> $rollback_log;
         }   
     }
-    var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }              
+    var $rollback_configuration := { call jcs:load-configuration( $commit-options = $rollback_options, $rollback = $cfg_version, $connection = $jnx ); }	
+}
+/* ------------------------------------------------------------------ */
+/* Function: ztp_rollback_phase0 - Rollbacks configuration to basic   */
+/* configuration template of Phase 0                                  */
+/* ------------------------------------------------------------------ */
+function ztp_script:ztp_rollback_phase0() {
+	var $lRollback = "ZTD Phase 0";
+    mvar $nRollback = 0;
+	mvar $bRollback = false();
+    var $got_rollback := jcs:execute( $jnx, 'get-commit-information' ); 
+	for-each ($got_rollback/commit-history/sequence-number){
+	    if (((../client == "autoinstall") || (../log == $lRollback)) && ( not ($bRollback))) {
+		   set $bRollback = true();
+		   set $nRollback = ../sequence-number;
+		   expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Starting rollback " _ $nRollback _ " to ZTD phase 0" );
+		}
+	}
+    var $rollback = ztp_script:rollback_cfg( $nRollback, $lRollback );
+	expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": rollback " _ $nRollback _ " completed successfully" );
+    result $nRollback;
 }
 /* ------------------------------------------------------------------ */
 /* Helper routines
