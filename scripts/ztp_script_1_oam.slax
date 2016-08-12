@@ -367,11 +367,11 @@ function ztp_script:set_dhcp_to_static($platform) {
     for-each ($got/groups[name=$ZTP_GROUP_PLATFORM]/apply-macro[name=$ZTP_MACRO_NAME_PREFIX _ $platform]/data/name) {
         if (../name == $ZTP_OAM_VLAN ) {
             set $ztp_oam_vlan = ../value;
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": FOUND VLAN: " _ ../value );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found vlan-id for OAM plane: " _ ../value );
         }
         if (../name == $ZTP_HOSTNAME ) {
             set $ztp_host_prefix = ../value;
-            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": FOUND HOST PREFIX: " _ ../value );
+            expr jcs:progress( $JNPR_ZTP_SCRIPT _ ": Found host name prefix: " _ ../value );
         }   
     }
      /* GET VALUES OF THE DHCP OPTIONS */
